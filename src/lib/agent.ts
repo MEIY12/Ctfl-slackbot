@@ -30,12 +30,33 @@ async function loadHistory(
   }
 }
 
+// Strip tool-call/tool-result messages from history so failed MCP calls don't
+// poison future turns and cause the model to stop retrying tools.
+// Only text-generating assistant messages and user messages are kept.
+function sanitizeHistoryMessages(messages: ModelMessage[]): ModelMessage[] {
+  return messages.filter((msg) => {
+    if (msg.role === "tool") return false;
+    if (
+      msg.role === "assistant" &&
+      Array.isArray(msg.content) &&
+      msg.content.length > 0 &&
+      (msg.content as Array<{ type: string }>).every(
+        (c) => c.type === "tool-call"
+      )
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 async function saveHistory(
   redis: Redis,
   threadId: string,
   messages: ModelMessage[]
 ): Promise<void> {
-  const trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
+  const sanitized = sanitizeHistoryMessages(messages);
+  const trimmed = sanitized.slice(-MAX_HISTORY_MESSAGES);
   await redis.set(
     `ctfl-bot:history:${threadId}`,
     JSON.stringify(trimmed),
@@ -121,7 +142,7 @@ export async function runAgent(
   const tools = await mcpClient.tools();
 
   const result = streamText({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5"),
     system: buildSystemPrompt(),
     messages: updatedHistory,
     tools,

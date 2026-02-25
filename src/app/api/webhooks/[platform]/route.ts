@@ -1,12 +1,14 @@
 import { after } from "next/server";
 import { bot } from "@/lib/bot";
 import { publishHomeTab, handleDisconnect } from "@/lib/slack-home";
+import { getConnectUrl } from "@/lib/auth";
 
 type Platform = keyof typeof bot.webhooks;
 
 type SlackIntercept =
   | { type: "app_home_opened"; userId: string }
-  | { type: "disconnect_action"; userId: string };
+  | { type: "slash_connect"; userId: string }
+  | { type: "slash_disconnect"; userId: string };
 
 function parseSlackIntercept(
   rawBody: string,
@@ -14,20 +16,25 @@ function parseSlackIntercept(
 ): SlackIntercept | null {
   try {
     if (contentType?.includes("application/x-www-form-urlencoded")) {
-      // Slack interactivity payloads are URL-encoded: payload=<json>
       const params = new URLSearchParams(rawBody);
       const payloadStr = params.get("payload");
-      if (!payloadStr) return null;
 
-      const payload = JSON.parse(payloadStr);
-      if (
-        payload.type === "block_actions" &&
-        Array.isArray(payload.actions) &&
-        payload.actions.some(
-          (a: { action_id: string }) => a.action_id === "contentful_disconnect"
-        )
-      ) {
-        return { type: "disconnect_action", userId: payload.user?.id };
+      if (payloadStr) {
+        // Interactivity payload (block actions) — no longer used but parsed defensively
+        return null;
+      }
+
+      // Slash command
+      const command = params.get("command");
+      const userId = params.get("user_id");
+
+      if (!userId) return null;
+
+      if (command === "/connect") {
+        return { type: "slash_connect", userId };
+      }
+      if (command === "/disconnect") {
+        return { type: "slash_disconnect", userId };
       }
     } else {
       // Regular event callbacks are JSON
@@ -71,16 +78,39 @@ export async function POST(
           console.error("[contentful-bot] home tab publish error:", e);
         }
       });
-    } else if (intercept?.type === "disconnect_action") {
-      // Handle entirely ourselves — no need to pass to Chat SDK
+    } else if (intercept?.type === "slash_connect") {
+      const connectUrl = `${getConnectUrl()}?uid=${encodeURIComponent(intercept.userId)}`;
+      return Response.json({
+        response_type: "ephemeral",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Connect Contentful to this workspace*\nClick the button below to authorize the bot with your Contentful account.",
+            },
+            accessory: {
+              type: "button",
+              text: { type: "plain_text", text: "Connect to Contentful", emoji: true },
+              style: "primary",
+              url: connectUrl,
+              action_id: "contentful_connect_link",
+            },
+          },
+        ],
+      });
+    } else if (intercept?.type === "slash_disconnect") {
       after(async () => {
         try {
           await handleDisconnect(intercept.userId);
         } catch (e) {
-          console.error("[contentful-bot] disconnect error:", e);
+          console.error("[contentful-bot] slash disconnect error:", e);
         }
       });
-      return new Response("", { status: 200 });
+      return Response.json({
+        response_type: "ephemeral",
+        text: "✅ Contentful has been disconnected from this workspace.",
+      });
     }
   }
 

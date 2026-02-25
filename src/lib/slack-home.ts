@@ -1,5 +1,5 @@
 import Redis from "ioredis";
-import { getStoredToken, clearToken, getConnectUrl } from "./auth";
+import { getStoredToken, clearToken } from "./auth";
 
 const SLACK_API = "https://slack.com/api";
 
@@ -16,7 +16,7 @@ export async function publishHomeTab(userId: string): Promise<void> {
 
   const view = {
     type: "home",
-    blocks: isConnected ? connectedBlocks() : disconnectedBlocks(getConnectUrl()),
+    blocks: isConnected ? connectedBlocks() : disconnectedBlocks(),
   };
 
   const res = await fetch(`${SLACK_API}/views.publish`, {
@@ -57,22 +57,6 @@ function connectedBlocks() {
         type: "mrkdwn",
         text: "*Status:* ✅ Connected to Contentful\n\nThe bot is authorized and ready to manage content in this workspace.",
       },
-      accessory: {
-        type: "button",
-        text: { type: "plain_text", text: "Disconnect", emoji: true },
-        style: "danger",
-        action_id: "contentful_disconnect",
-        confirm: {
-          title: { type: "plain_text", text: "Disconnect Contentful?" },
-          text: {
-            type: "mrkdwn",
-            text: "This will remove the bot's access to Contentful. @mentions will stop working until someone reconnects.",
-          },
-          confirm: { type: "plain_text", text: "Yes, disconnect" },
-          deny: { type: "plain_text", text: "Cancel" },
-          style: "danger",
-        },
-      },
     },
     { type: "divider" },
     {
@@ -80,6 +64,13 @@ function connectedBlocks() {
       text: {
         type: "mrkdwn",
         text: "*How to use:*\n• Mention *@ContentfulBot* in any channel to start a task\n• Reply in the thread to continue the conversation\n• Ask it to create campaigns, banners, pages, blog posts, FAQs, and more",
+      },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "*Manage connection:*\nTo disconnect, run `/disconnect` in any channel.",
       },
     },
     {
@@ -94,7 +85,7 @@ function connectedBlocks() {
   ];
 }
 
-function disconnectedBlocks(connectUrl: string) {
+function disconnectedBlocks() {
   return [
     {
       type: "header",
@@ -106,12 +97,12 @@ function disconnectedBlocks(connectUrl: string) {
         type: "mrkdwn",
         text: "*Status:* ❌ Not connected\n\nAn admin needs to authorize this bot with Contentful before it can manage content.",
       },
-      accessory: {
-        type: "button",
-        text: { type: "plain_text", text: "Connect to Contentful", emoji: true },
-        style: "primary",
-        url: connectUrl,
-        action_id: "contentful_connect",
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "To connect, run `/connect` in any channel.",
       },
     },
     { type: "divider" },
