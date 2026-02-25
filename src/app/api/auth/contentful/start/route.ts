@@ -16,7 +16,10 @@ export async function GET(req: NextRequest) {
     const { codeVerifier, codeChallenge } = generatePKCE();
     const state = randomBytes(16).toString("hex");
 
-    await storeOAuthState(redis, state, { codeVerifier });
+    // Optionally carry the Slack user ID so we can refresh their home tab after connect
+    const slackUserId = req.nextUrl.searchParams.get("uid") ?? undefined;
+
+    await storeOAuthState(redis, state, { codeVerifier, slackUserId });
 
     const clientId = getClientId();
     const redirectUri = getRedirectUri();
@@ -28,12 +31,6 @@ export async function GET(req: NextRequest) {
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
-
-    // Carry the return URL through as a fragment param if provided
-    const returnTo = req.nextUrl.searchParams.get("returnTo");
-    if (returnTo) {
-      authUrl.searchParams.set("return_to", returnTo);
-    }
 
     return NextResponse.redirect(authUrl.toString());
   } finally {

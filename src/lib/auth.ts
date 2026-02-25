@@ -68,7 +68,7 @@ export async function clearToken(redis: Redis): Promise<void> {
 export async function storeOAuthState(
   redis: Redis,
   state: string,
-  data: { codeVerifier: string }
+  data: { codeVerifier: string; slackUserId?: string }
 ): Promise<void> {
   await redis.set(
     `ctfl-bot:oauth-state:${state}`,
@@ -81,7 +81,7 @@ export async function storeOAuthState(
 export async function popOAuthState(
   redis: Redis,
   state: string
-): Promise<{ codeVerifier: string } | null> {
+): Promise<{ codeVerifier: string; slackUserId?: string } | null> {
   const raw = await redis.get(`ctfl-bot:oauth-state:${state}`);
   if (!raw) return null;
   await redis.del(`ctfl-bot:oauth-state:${state}`);

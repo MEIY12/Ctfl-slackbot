@@ -1,6 +1,14 @@
 import Link from "next/link";
 
-export default function ConnectPage() {
+export default async function ConnectPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ uid?: string }>;
+}) {
+  const { uid } = await searchParams;
+  const startHref = uid
+    ? `/api/auth/contentful/start?uid=${encodeURIComponent(uid)}`
+    : "/api/auth/contentful/start";
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <div className="w-full max-w-md px-6 py-16">
@@ -46,7 +54,7 @@ export default function ConnectPage() {
           </div>
 
           <Link
-            href="/api/auth/contentful/start"
+            href={startHref}
             className="block w-full rounded-lg bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
           >
             Authorize with Contentful

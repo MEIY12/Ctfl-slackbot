@@ -7,6 +7,7 @@ import {
   storeToken,
   MCP_TOKEN_URL,
 } from "@/lib/auth";
+import { publishHomeTab } from "@/lib/slack-home";
 
 const SUCCESS_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -152,6 +153,15 @@ export async function GET(req: NextRequest) {
     });
 
     console.log("[contentful-bot] OAuth complete — token stored for workspace");
+
+    // Refresh the home tab for the user who initiated the flow (if we know who they are)
+    const slackUserId = stateData.slackUserId;
+    if (slackUserId) {
+      await publishHomeTab(slackUserId).catch((e) =>
+        console.error("[contentful-bot] home tab refresh after connect failed:", e)
+      );
+    }
+
     return html(SUCCESS_HTML);
   } finally {
     await redis.quit();

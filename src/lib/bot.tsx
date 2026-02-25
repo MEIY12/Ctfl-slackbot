@@ -2,9 +2,8 @@
 import { Chat } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { createRedisState } from "@chat-adapter/state-redis";
-import Redis from "ioredis";
 import { runAgent, NotConnectedError } from "./agent";
-import { getConnectUrl, clearToken } from "./auth";
+import { getConnectUrl } from "./auth";
 
 export const bot = new Chat({
   userName: "contentful-bot",
@@ -14,19 +13,16 @@ export const bot = new Chat({
   state: createRedisState(),
 });
 
-function notConnectedMessage(): string {
-  const connectUrl = getConnectUrl();
+function notConnectedMessage(slackUserId?: string): string {
+  const base = getConnectUrl();
+  const connectUrl = slackUserId
+    ? `${base}?uid=${encodeURIComponent(slackUserId)}`
+    : base;
   return (
     `*Contentful isn't connected yet.* ` +
     `An admin needs to authorize this bot before it can manage content.\n\n` +
     `*<${connectUrl}|Connect to Contentful →>*`
   );
-}
-
-// Returns true if the message is a disconnect command (strips bot mention first)
-function isDisconnectCommand(text: string): boolean {
-  const cleaned = text.replace(/<@[^>]+>/g, "").trim().toLowerCase();
-  return cleaned === "disconnect" || cleaned === "disconnect contentful";
 }
 
 // When a user @mentions the bot, subscribe to the thread and start an agent conversation
@@ -36,20 +32,6 @@ bot.onNewMention(async (thread, message) => {
   const threadId = thread.id;
   const userText = message.text ?? "";
 
-  // Handle disconnect command before sending to the agent
-  if (isDisconnectCommand(userText)) {
-    const redis = new Redis(process.env.REDIS_URL!);
-    try {
-      await clearToken(redis);
-      await thread.post(
-        "*Contentful disconnected.* The bot will prompt for authorization on the next @mention."
-      );
-    } finally {
-      await redis.quit();
-    }
-    return;
-  }
-
   try {
     const textStream = await runAgent(threadId, userText);
     // PostableMessage includes AsyncIterable<string>
@@ -57,7 +39,7 @@ bot.onNewMention(async (thread, message) => {
     await thread.post(textStream as any);
   } catch (err) {
     if (err instanceof NotConnectedError) {
-      await thread.post(notConnectedMessage());
+      await thread.post(notConnectedMessage(message.author?.userId));
       return;
     }
     console.error("[contentful-bot] agent error on mention:", err);
@@ -78,7 +60,7 @@ bot.onSubscribedMessage(async (thread, message) => {
     await thread.post(textStream as any);
   } catch (err) {
     if (err instanceof NotConnectedError) {
-      await thread.post(notConnectedMessage());
+      await thread.post(notConnectedMessage(message.author?.userId));
       return;
     }
     console.error("[contentful-bot] agent error on reply:", err);
