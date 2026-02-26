@@ -85,11 +85,20 @@ const ERROR_HTML = (message: string) => `<!DOCTYPE html>
   <div class="card">
     <div class="icon">❌</div>
     <h1>Authorization failed</h1>
-    <p><code>${message}</code></p>
+    <p><code>${escapeHtml(message)}</code></p>
     <p style="margin-top:12px">Please try again by clicking the link in Slack.</p>
   </div>
 </body>
 </html>`;
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 function html(content: string, status = 200) {
   return new Response(content, {
@@ -150,7 +159,7 @@ export async function GET(req: NextRequest) {
       refreshToken: tokenData.refresh_token ?? "",
       expiresAt: Date.now() + (tokenData.expires_in ?? 3600) * 1000,
       clientId,
-    });
+    }, stateData.slackUserId);
 
     console.log("[contentful-bot] OAuth complete — token stored for workspace");
 

@@ -8,7 +8,7 @@ export async function publishHomeTab(userId: string): Promise<void> {
   let isConnected = false;
 
   try {
-    const token = await getStoredToken(redis);
+    const token = await getStoredToken(redis, userId);
     isConnected = !!token;
   } finally {
     await redis.quit();
@@ -37,7 +37,7 @@ export async function publishHomeTab(userId: string): Promise<void> {
 export async function handleDisconnect(userId: string): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL!);
   try {
-    await clearToken(redis);
+    await clearToken(redis, userId);
     console.log("[contentful-bot] Contentful disconnected by user", userId);
   } finally {
     await redis.quit();
@@ -78,7 +78,7 @@ function connectedBlocks() {
       elements: [
         {
           type: "mrkdwn",
-          text: "Content is only published when you explicitly ask. Large changes are confirmed before execution.",
+          text: "Content is only published when you explicitly ask. Approve execution with ✅ or a text reply like \"approved\" or \"please proceed.\"",
         },
       ],
     },

@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { createHmac, timingSafeEqual } from "crypto";
 import { bot } from "@/lib/bot";
 import { publishHomeTab, handleDisconnect } from "@/lib/slack-home";
 import { getConnectUrl } from "@/lib/auth";
@@ -9,6 +10,36 @@ type SlackIntercept =
   | { type: "app_home_opened"; userId: string }
   | { type: "slash_connect"; userId: string }
   | { type: "slash_disconnect"; userId: string };
+
+function verifySlackSignature(request: Request, rawBody: string): boolean {
+  const signingSecret = process.env.SLACK_SIGNING_SECRET;
+  if (!signingSecret) {
+    console.error("[contentful-bot] SLACK_SIGNING_SECRET is not set");
+    return false;
+  }
+
+  const timestamp = request.headers.get("x-slack-request-timestamp");
+  const signature = request.headers.get("x-slack-signature");
+  if (!timestamp || !signature) return false;
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) return false;
+
+  // Reject replayed requests older than 5 minutes.
+  if (Math.abs(Date.now() / 1000 - timestampSeconds) > 60 * 5) {
+    return false;
+  }
+
+  const base = `v0:${timestamp}:${rawBody}`;
+  const expectedSignature = `v0=${createHmac("sha256", signingSecret)
+    .update(base)
+    .digest("hex")}`;
+
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expectedSignature);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 function parseSlackIntercept(
   rawBody: string,
@@ -66,6 +97,11 @@ export async function POST(
     // Clone before reading so the original is still consumable by the Chat SDK
     const clone = request.clone();
     const rawBody = await clone.text();
+
+    if (!verifySlackSignature(request, rawBody)) {
+      return new Response("Invalid Slack signature", { status: 401 });
+    }
+
     const contentType = request.headers.get("content-type");
     const intercept = parseSlackIntercept(rawBody, contentType);
 
