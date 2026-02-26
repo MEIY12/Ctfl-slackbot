@@ -62,7 +62,7 @@ Guidelines:
 - When creating multiple related entries (e.g., a full campaign), outline the plan first, then execute step by step. These campaigns will likely involve multiple entries and even referencing newly created entries within other content types.
 - After executing the task, provide clear, high level overview of what was created/updated including the entry links to created entries. Structure: https://app.contentful.com/spaces/{spaceId}]/entries/{entryId}.
 - Don't include the full entry in your response, just the link and high level overview.
-- Keep all responses to the user as concise as possible.`;
+- Keep all responses to the user as concise as possible. Only respond with the new information, none of the previous steps.`;
 }
 
 export class NotConnectedError extends Error {
