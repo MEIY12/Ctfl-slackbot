@@ -50,7 +50,8 @@ async function runAgentAndAwaitConfirmation(
       for await (const chunk of textStream) {
         chunks.push(chunk);
       }
-      sent = await thread.post(chunks.join(""));
+      const fullText = chunks.join("");
+      sent = await thread.post(fullText);
     } else {
       // Message context: _currentMessage is set, streaming works fine.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
