@@ -34,3 +34,10 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Slack Bot Approval Behavior
+
+- Plan and execute flows are scoped per Slack thread so different threads can run at the same time.
+- When a thread is waiting for approval, free-form replies are interpreted semantically as approve, cancel, or unclear.
+- If a reply is unclear, the bot does not auto-execute and the conversation continues normally.
+- Users can always use ✅ to proceed or ❌ to cancel on the bot's pending message.

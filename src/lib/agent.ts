@@ -1,6 +1,6 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { openai } from "@ai-sdk/openai";
-import { streamText, stepCountIs, type ModelMessage } from "ai";
+import { generateText, streamText, stepCountIs, type ModelMessage } from "ai";
 import { createHash, randomUUID } from "crypto";
 import Redis from "ioredis";
 import { getStoredToken, refreshTokenIfNeeded, type StoredToken } from "./auth";
@@ -472,12 +472,20 @@ Before planning or execution:
 - Review relevant content types and required fields.
 - Adapt to granted capabilities at runtime.
 - Support any content model discovered at runtime; never assume fixed content type names or fixed relationship shapes.
+- If a user question or execution step depends on existing Contentful data (for example: content type IDs, entry IDs, linked references, slug lookups), resolve it by querying MCP tools and inspecting existing content structure before asking the user.
+- Prefer evidence from the space (content model + existing entries/assets) over asking follow-up questions.
+- Make reasonable assumptions from discovered naming/content patterns when exact matches are missing, and clearly mark those assumptions as inferred.
+- Ask the user only when MCP/content-structure lookup cannot produce a reliable answer.
 
 Response style (always):
 - Be very concise and to the point.
 - Keep responses short; default to brief bullets.
 - Do not repeat context, dump fields, or explain internal mechanics unless asked.
 - Do not include extra sections such as long assumptions, rationale, or next-step menus unless the user requests them.
+- Slack supports Markdown output. Prefer concise Markdown that renders cleanly in Slack:
+  - Use short headings, bullets, inline code, and inline links when helpful.
+  - Avoid HTML and deeply nested or decorative formatting.
+  - Keep code fences short and only include them when the user asks for code.
 
 Mode rules:
 - Straightforward questions: answer directly and briefly.
@@ -632,6 +640,32 @@ export class NotConnectedError extends Error {
   }
 }
 
+export type PendingIntent = "approve" | "cancel" | "unclear";
+
+export async function classifyPendingIntent(messageText: string): Promise<PendingIntent> {
+  const trimmed = messageText.trim();
+  if (!trimmed) return "unclear";
+
+  try {
+    const result = await generateText({
+      model: openai("gpt-5-mini"),
+      temperature: 0,
+      maxOutputTokens: 8,
+      system:
+        "You classify whether a user message is an approval to proceed, a cancellation, or unclear. " +
+        "Respond with exactly one lowercase word: approve, cancel, or unclear.",
+      prompt: `Message:\n"""${trimmed}"""`,
+    });
+
+    const normalized = result.text.trim().toLowerCase();
+    if (normalized === "approve") return "approve";
+    if (normalized === "cancel") return "cancel";
+    return "unclear";
+  } catch {
+    return "unclear";
+  }
+}
+
 export async function getWorkspaceToken(): Promise<StoredToken | null> {
   const redis = getRedis();
   try {
@@ -647,6 +681,7 @@ export async function runAgent(
   options?: {
     slackUserId?: string;
     executionMode?: "plan" | "execute";
+    requestScopeId?: string;
   }
 ): Promise<AsyncIterable<string>> {
   const redis = getRedis();
@@ -661,14 +696,18 @@ export async function runAgent(
   };
   const slackUserId = options?.slackUserId;
   const executionMode = options?.executionMode ?? "plan";
+  const requestScopeId = options?.requestScopeId;
   const isHighCompositionRequest = detectHighCompositionRequest(userMessage);
   const expectedCompositionDepth = inferExpectedCompositionDepth(userMessage);
-  const messageHash = hashMessage(userMessage);
+  const messageHash = hashMessage(
+    `${executionMode}\n${requestScopeId ?? "default"}\n${userMessage}`
+  );
   const responseKey = getIdempotencyResponseKey(threadId, messageHash);
   const lockKey = getIdempotencyLockKey(threadId, messageHash);
   trace("run:start", {
     threadId,
     executionMode,
+    requestScopeId: requestScopeId ?? null,
     hasSlackUserId: Boolean(slackUserId),
     isHighCompositionRequest,
     expectedCompositionDepth,
