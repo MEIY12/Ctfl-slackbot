@@ -8,13 +8,19 @@ import {
   LinkButton,
   Section,
   emoji,
+  type Attachment,
   type CardElement,
   type Thread,
 } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { createRedisState } from "@chat-adapter/state-redis";
 import Redis from "ioredis";
-import { classifyPendingIntent, runAgent, NotConnectedError } from "./agent";
+import {
+  classifyPendingIntent,
+  runAgent,
+  NotConnectedError,
+  type FileAttachment,
+} from "./agent";
 import { getConnectUrl, getStoredToken, refreshTokenIfNeeded } from "./auth";
 
 const PENDING_TTL_MS = 1000 * 60 * 60 * 24;
@@ -47,6 +53,44 @@ function notConnectedMessage(slackUserId?: string): string {
     `An admin needs to authorize this bot before it can manage content.\n\n` +
     `*<${connectUrl}|Connect to Contentful →>*`
   );
+}
+
+const MAX_ATTACHMENT_COUNT = 10;
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024; // 20 MB
+
+async function downloadAttachments(
+  attachments: Attachment[] | undefined
+): Promise<FileAttachment[]> {
+  if (!attachments || attachments.length === 0) return [];
+
+  const eligible = attachments
+    .filter((a) => typeof a.fetchData === "function")
+    .slice(0, MAX_ATTACHMENT_COUNT);
+
+  const results = await Promise.allSettled(
+    eligible.map(async (a): Promise<FileAttachment | null> => {
+      try {
+        const data = await a.fetchData!();
+        if (data.length > MAX_ATTACHMENT_BYTES) {
+          console.warn(
+            `[contentful-bot] skipping oversized attachment: ${a.name ?? "unknown"} (${data.length} bytes)`
+          );
+          return null;
+        }
+        return { data, name: a.name, mimeType: a.mimeType };
+      } catch (err) {
+        console.warn("[contentful-bot] failed to download attachment:", a.name, err);
+        return null;
+      }
+    })
+  );
+
+  return results
+    .filter(
+      (r): r is PromiseFulfilledResult<FileAttachment> =>
+        r.status === "fulfilled" && r.value !== null
+    )
+    .map((r) => r.value);
 }
 
 function pendingMessageKey(messageId: string): string {
@@ -449,7 +493,7 @@ async function tryHandlePendingExecution(
     return true;
   }
 
-  const intent = await classifyPendingIntent(messageText ?? "");
+  const intent = classifyPendingIntent(messageText ?? "");
   if (intent === "cancel") {
     await clearPendingApproval(pendingMessageId, pending);
     await thread.post("Understood — cancelled. Share updates anytime when you're ready.");
@@ -461,39 +505,43 @@ async function tryHandlePendingExecution(
   await clearPendingApproval(pendingMessageId, pending);
   await thread.post(EXECUTION_ACK_MESSAGE);
 
-  void runAgentAndAwaitConfirmation(
+  void runAgentAndRespond(
     thread,
     (messageText ?? "").trim() || "Please continue.",
     pending.originalMessageId,
     pending.pendingUserId,
     pending.threadId,
-    "execute",
-    `approval:${pendingMessageId}`
+    `approval:${pendingMessageId}`,
+    undefined,
+    true
   );
   return true;
 }
 
-// Run the agent, post its response, then store the bot's response message
-// as the pending target so the user can ✅/❌ react to it.
+// Run the agent and post its response. When isApproval is false (initial
+// request), store a pending approval so the user can ✅/❌ to trigger
+// execution. When isApproval is true, show a showcase card if the response
+// contains created entry links.
 //
 // historyThreadId: when provided (reaction context), use this for agent history
 // instead of thread.id, and collect the stream to text before posting because
 // reaction event threads have no _currentMessage and cannot stream.
-async function runAgentAndAwaitConfirmation(
+async function runAgentAndRespond(
   thread: Thread<unknown, unknown>,
   userText: string,
   originalMessageId: string,
   slackUserId?: string,
   historyThreadId?: string,
-  executionMode: "plan" | "execute" = "plan",
-  requestScopeId?: string
+  requestScopeId?: string,
+  attachments?: FileAttachment[],
+  isApproval = false
 ): Promise<void> {
   const agentThreadId = historyThreadId ?? thread.id;
   try {
     const textStream = await runAgent(agentThreadId, userText, {
       slackUserId,
-      executionMode,
       requestScopeId,
+      attachments,
     });
 
     const chunks: string[] = [];
@@ -506,20 +554,17 @@ async function runAgentAndAwaitConfirmation(
 
     let sent;
     if (historyThreadId) {
-      // Reaction context: no _currentMessage on thread, streaming crashes.
-      // Collect full text first, then post as markdown.
       for await (const chunk of textStream) {
         chunks.push(chunk);
       }
       sent = await thread.post({ markdown: chunks.join("") });
     } else {
-      // Message context: _currentMessage is set, streaming works fine.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       sent = await thread.post(captureStream() as any);
     }
     const fullText = chunks.join("");
 
-    if (executionMode === "plan") {
+    if (!isApproval) {
       const pending: PendingApproval = {
         threadId: agentThreadId,
         originalMessageId,
@@ -538,7 +583,7 @@ async function runAgentAndAwaitConfirmation(
       }
     }
 
-    if (executionMode === "execute" && thread.adapter.name === "slack") {
+    if (thread.adapter.name === "slack") {
       const showcaseCard = await buildCreatedEntriesShowcaseCard(fullText, slackUserId);
       if (showcaseCard) {
         await thread.post({
@@ -559,22 +604,21 @@ async function runAgentAndAwaitConfirmation(
   }
 }
 
-// When a user @mentions the bot, react with eyes, run the agent, then wait for confirmation
 bot.onNewMention(async (thread, message) => {
   await thread.subscribe();
   await thread.adapter.addReaction(thread.id, message.id, emoji.eyes);
-  void runAgentAndAwaitConfirmation(
+  const files = await downloadAttachments(message.attachments);
+  void runAgentAndRespond(
     thread,
     message.text ?? "",
     message.id,
     message.author?.userId,
     undefined,
-    "plan",
-    `message:${message.id}:plan`
+    `message:${message.id}`,
+    files
   );
 });
 
-// When a user replies in a subscribed thread, same flow
 bot.onSubscribedMessage(async (thread, message) => {
   await thread.adapter.addReaction(thread.id, message.id, emoji.eyes);
   const handledApproval = await tryHandlePendingExecution(
@@ -583,14 +627,15 @@ bot.onSubscribedMessage(async (thread, message) => {
     message.author?.userId
   );
   if (handledApproval) return;
-  void runAgentAndAwaitConfirmation(
+  const files = await downloadAttachments(message.attachments);
+  void runAgentAndRespond(
     thread,
     message.text ?? "",
     message.id,
     message.author?.userId,
     undefined,
-    "plan",
-    `message:${message.id}:plan`
+    `message:${message.id}`,
+    files
   );
 });
 
@@ -632,13 +677,14 @@ bot.onReaction(["check", "x"], async (event) => {
 
   // Continue the conversation — pass pending.threadId so agent uses correct
   // history and post is non-streaming (reaction threads have no _currentMessage)
-  void runAgentAndAwaitConfirmation(
+  void runAgentAndRespond(
     event.thread,
     "Yes, please proceed.",
     originalMessageId,
     pendingUserId,
     pending.threadId,
-    "execute",
-    `approval:${event.messageId}`
+    `approval:${event.messageId}`,
+    undefined,
+    true
   );
 });
