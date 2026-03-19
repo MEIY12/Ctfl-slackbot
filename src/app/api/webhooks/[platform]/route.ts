@@ -4,6 +4,8 @@ import { bot } from "@/lib/bot";
 import { publishHomeTab, handleDisconnect } from "@/lib/slack-home";
 import { getConnectUrl } from "@/lib/auth";
 
+export const maxDuration = 60;
+
 type Platform = keyof typeof bot.webhooks;
 
 type SlackIntercept =

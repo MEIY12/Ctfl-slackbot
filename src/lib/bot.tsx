@@ -505,7 +505,7 @@ async function tryHandlePendingExecution(
   await clearPendingApproval(pendingMessageId, pending);
   await thread.post(EXECUTION_ACK_MESSAGE);
 
-  void runAgentAndRespond(
+  await runAgentAndRespond(
     thread,
     (messageText ?? "").trim() || "Please continue.",
     pending.originalMessageId,
@@ -608,7 +608,7 @@ bot.onNewMention(async (thread, message) => {
   await thread.subscribe();
   await thread.adapter.addReaction(thread.id, message.id, emoji.eyes);
   const files = await downloadAttachments(message.attachments);
-  void runAgentAndRespond(
+  await runAgentAndRespond(
     thread,
     message.text ?? "",
     message.id,
@@ -628,7 +628,7 @@ bot.onSubscribedMessage(async (thread, message) => {
   );
   if (handledApproval) return;
   const files = await downloadAttachments(message.attachments);
-  void runAgentAndRespond(
+  await runAgentAndRespond(
     thread,
     message.text ?? "",
     message.id,
@@ -677,7 +677,7 @@ bot.onReaction(["check", "x"], async (event) => {
 
   // Continue the conversation — pass pending.threadId so agent uses correct
   // history and post is non-streaming (reaction threads have no _currentMessage)
-  void runAgentAndRespond(
+  await runAgentAndRespond(
     event.thread,
     "Yes, please proceed.",
     originalMessageId,
