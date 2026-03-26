@@ -29,7 +29,7 @@ export function getAppUrl(): string {
 }
 
 export function getClientId(): string {
-  return `${getAppUrl()}/api/auth/contentful/client-metadata`;
+  return `${getAppUrl()}/api/auth/contentful/client`;
 }
 
 export function getRedirectUri(): string {

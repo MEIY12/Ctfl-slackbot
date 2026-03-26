@@ -1,8 +1,8 @@
 import { getClientId, getRedirectUri } from "@/lib/auth";
 
-// OAuth 2.0 client metadata document - used as the client_id for the MCP server
-// The MCP server fetches this URL to learn about our app (no pre-registration needed)
 export function GET() {
+  console.log("[contentful-bot] client metadata requested");
+
   const clientId = getClientId();
   const redirectUri = getRedirectUri();
 
