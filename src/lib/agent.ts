@@ -110,12 +110,29 @@ async function loadHistory(
   }
 }
 
+function stripProviderOptions(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((msg) => {
+    const { providerOptions, ...rest } = msg;
+    if (!Array.isArray(rest.content)) return rest as ModelMessage;
+    return {
+      ...rest,
+      content: (rest.content as Array<Record<string, unknown>>).map((part) => {
+        if (part && typeof part === "object" && "providerOptions" in part) {
+          const { providerOptions: _, ...partRest } = part;
+          return partRest;
+        }
+        return part;
+      }),
+    } as ModelMessage;
+  });
+}
+
 async function saveHistory(
   redis: Redis,
   threadId: string,
   messages: ModelMessage[]
 ): Promise<void> {
-  const trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
+  const trimmed = stripProviderOptions(messages).slice(-MAX_HISTORY_MESSAGES);
   await redis.set(
     `ctfl-bot:history:${threadId}`,
     JSON.stringify(trimmed),
