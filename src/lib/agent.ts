@@ -8,7 +8,7 @@ import {
 } from "ai";
 import { createHash } from "crypto";
 import Redis from "ioredis";
-import { getStoredToken, refreshTokenIfNeeded, type StoredToken } from "./auth";
+import { getStoredToken, refreshTokenIfNeeded, TokenExpiredError, type StoredToken } from "./auth";
 
 const HISTORY_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const MAX_HISTORY_MESSAGES = 40;
@@ -311,7 +311,6 @@ export async function runAgent(
   threadId: string,
   userMessage: string,
   options?: {
-    slackUserId?: string;
     requestScopeId?: string;
     attachments?: FileAttachment[];
   }
@@ -326,7 +325,6 @@ export async function runAgent(
     }
     console.log(`[agent] ${stage}`);
   };
-  const slackUserId = options?.slackUserId;
   const requestScopeId = options?.requestScopeId;
   const messageHash = hashMessage(
     `${requestScopeId ?? "default"}\n${userMessage}`
@@ -336,11 +334,10 @@ export async function runAgent(
   trace("run:start", {
     threadId,
     requestScopeId: requestScopeId ?? null,
-    hasSlackUserId: Boolean(slackUserId),
   });
 
   const [rawToken, history, cachedResponse] = await Promise.all([
-    getStoredToken(redis, slackUserId),
+    getStoredToken(redis),
     loadHistory(redis, threadId),
     redis.get(responseKey),
   ]);
@@ -377,7 +374,16 @@ export async function runAgent(
   }
   trace("run:lock-acquired");
 
-  const token = await refreshTokenIfNeeded(redis, rawToken, slackUserId);
+  let token: StoredToken;
+  try {
+    token = await refreshTokenIfNeeded(redis, rawToken);
+  } catch (err) {
+    if (err instanceof TokenExpiredError) {
+      await redis.quit();
+      throw new NotConnectedError();
+    }
+    throw err;
+  }
   const userContent = await buildUserContent(userMessage, options?.attachments);
   const updatedHistory: ModelMessage[] = [
     ...history,

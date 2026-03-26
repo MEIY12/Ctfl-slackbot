@@ -8,7 +8,7 @@ export async function publishHomeTab(userId: string): Promise<void> {
   let isConnected = false;
 
   try {
-    const token = await getStoredToken(redis, userId);
+    const token = await getStoredToken(redis);
     isConnected = !!token;
   } finally {
     await redis.quit();
@@ -37,7 +37,7 @@ export async function publishHomeTab(userId: string): Promise<void> {
 export async function handleDisconnect(userId: string): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL!);
   try {
-    await clearToken(redis, userId);
+    await clearToken(redis);
     console.log("[contentful-bot] Contentful disconnected by user", userId);
   } finally {
     await redis.quit();

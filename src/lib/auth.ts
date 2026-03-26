@@ -4,9 +4,7 @@ import Redis from "ioredis";
 export const MCP_TOKEN_URL = "https://mcp.contentful.com/token";
 export const MCP_AUTHORIZE_URL = "https://mcp.contentful.com/authorize";
 
-// Per-user token storage (Slack user ID), with a legacy workspace fallback key.
-const LEGACY_WORKSPACE_TOKEN_KEY = "ctfl-bot:oauth:workspace";
-const USER_TOKEN_KEY_PREFIX = "ctfl-bot:oauth:user:";
+const WORKSPACE_TOKEN_KEY = "ctfl-bot:oauth:workspace";
 const OAUTH_STATE_TTL = 60 * 10; // 10 minutes
 const TOKEN_TTL = 60 * 60 * 24 * 30; // 30 days
 
@@ -17,8 +15,11 @@ export interface StoredToken {
   clientId: string;
 }
 
-function getUserTokenKey(slackUserId: string): string {
-  return `${USER_TOKEN_KEY_PREFIX}${slackUserId}`;
+export class TokenExpiredError extends Error {
+  constructor(message = "Stored token is no longer valid") {
+    super(message);
+    this.name = "TokenExpiredError";
+  }
 }
 
 export function getAppUrl(): string {
@@ -47,25 +48,11 @@ export function generatePKCE(): { codeVerifier: string; codeChallenge: string } 
   return { codeVerifier, codeChallenge };
 }
 
-export async function getStoredToken(
-  redis: Redis,
-  slackUserId?: string
-): Promise<StoredToken | null> {
-  if (slackUserId) {
-    const userRaw = await redis.get(getUserTokenKey(slackUserId));
-    if (userRaw) {
-      try {
-        return JSON.parse(userRaw) as StoredToken;
-      } catch {
-        // Fall through to legacy fallback on parse failure.
-      }
-    }
-  }
-
-  const legacyRaw = await redis.get(LEGACY_WORKSPACE_TOKEN_KEY);
-  if (!legacyRaw) return null;
+export async function getStoredToken(redis: Redis): Promise<StoredToken | null> {
+  const raw = await redis.get(WORKSPACE_TOKEN_KEY);
+  if (!raw) return null;
   try {
-    return JSON.parse(legacyRaw) as StoredToken;
+    return JSON.parse(raw) as StoredToken;
   } catch {
     return null;
   }
@@ -73,26 +60,18 @@ export async function getStoredToken(
 
 export async function storeToken(
   redis: Redis,
-  token: StoredToken,
-  slackUserId?: string
+  token: StoredToken
 ): Promise<void> {
-  const key = slackUserId
-    ? getUserTokenKey(slackUserId)
-    : LEGACY_WORKSPACE_TOKEN_KEY;
   await redis.set(
-    key,
+    WORKSPACE_TOKEN_KEY,
     JSON.stringify(token),
     "EX",
     TOKEN_TTL
   );
 }
 
-export async function clearToken(redis: Redis, slackUserId?: string): Promise<void> {
-  if (slackUserId) {
-    await redis.del(getUserTokenKey(slackUserId));
-    return;
-  }
-  await redis.del(LEGACY_WORKSPACE_TOKEN_KEY);
+export async function clearToken(redis: Redis): Promise<void> {
+  await redis.del(WORKSPACE_TOKEN_KEY);
 }
 
 export async function storeOAuthState(
@@ -124,10 +103,8 @@ export async function popOAuthState(
 
 export async function refreshTokenIfNeeded(
   redis: Redis,
-  token: StoredToken,
-  slackUserId?: string
+  token: StoredToken
 ): Promise<StoredToken> {
-  // Refresh if expires within 5 minutes
   if (token.expiresAt > Date.now() + 5 * 60 * 1000) {
     return token;
   }
@@ -144,6 +121,15 @@ export async function refreshTokenIfNeeded(
 
   if (!res.ok) {
     const err = await res.text();
+    const isInvalidClient =
+      res.status === 401 &&
+      (err.includes("invalid_client") || err.includes("invalid_grant"));
+    if (isInvalidClient) {
+      await clearToken(redis);
+      throw new TokenExpiredError(
+        `Contentful client is no longer valid — please reconnect via /connect`
+      );
+    }
     throw new Error(`Token refresh failed (${res.status}): ${err}`);
   }
 
@@ -155,6 +141,6 @@ export async function refreshTokenIfNeeded(
     clientId: token.clientId,
   };
 
-  await storeToken(redis, newToken, slackUserId);
+  await storeToken(redis, newToken);
   return newToken;
 }

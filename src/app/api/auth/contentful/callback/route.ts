@@ -159,7 +159,7 @@ export async function GET(req: NextRequest) {
       refreshToken: tokenData.refresh_token ?? "",
       expiresAt: Date.now() + (tokenData.expires_in ?? 3600) * 1000,
       clientId,
-    }, stateData.slackUserId);
+    });
 
     console.log("[contentful-bot] OAuth complete — token stored for workspace");
 

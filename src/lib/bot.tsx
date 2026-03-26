@@ -43,11 +43,8 @@ export const bot = new Chat({
   state: createRedisState(),
 });
 
-function notConnectedMessage(slackUserId?: string): string {
-  const base = getConnectUrl();
-  const connectUrl = slackUserId
-    ? `${base}?uid=${encodeURIComponent(slackUserId)}`
-    : base;
+function notConnectedMessage(): string {
+  const connectUrl = getConnectUrl();
   return (
     `*Contentful isn't connected yet.* ` +
     `An admin needs to authorize this bot before it can manage content.\n\n` +
@@ -341,8 +338,7 @@ function pickEntryPreview(fields: unknown, title?: string): string | null {
 }
 
 async function loadEntryMetadataForUrls(
-  urls: string[],
-  slackUserId?: string
+  urls: string[]
 ): Promise<Map<string, ResolvedEntryMeta>> {
   const metadata = new Map<string, ResolvedEntryMeta>();
   const redisUrl = process.env.REDIS_URL;
@@ -350,9 +346,9 @@ async function loadEntryMetadataForUrls(
 
   const redis = new Redis(redisUrl);
   try {
-    const storedToken = await getStoredToken(redis, slackUserId);
+    const storedToken = await getStoredToken(redis);
     if (!storedToken) return metadata;
-    const token = await refreshTokenIfNeeded(redis, storedToken, slackUserId);
+    const token = await refreshTokenIfNeeded(redis, storedToken);
 
     await Promise.all(
       urls.map(async (url) => {
@@ -408,8 +404,7 @@ function buildEntryDisplayLabel(
 }
 
 async function buildCreatedEntriesShowcaseCard(
-  summaryText: string,
-  slackUserId?: string
+  summaryText: string
 ): Promise<CardElement | null> {
   const entries = extractCreatedEntryItems(summaryText);
   if (entries.length === 0) return null;
@@ -417,8 +412,7 @@ async function buildCreatedEntriesShowcaseCard(
   const displayedEntries = entries.slice(0, MAX_SHOWCASE_ENTRIES);
   const overflowCount = entries.length - displayedEntries.length;
   const metadataByUrl = await loadEntryMetadataForUrls(
-    displayedEntries.map((entry) => entry.url),
-    slackUserId
+    displayedEntries.map((entry) => entry.url)
   );
   const entrySections = displayedEntries.flatMap((entry, index) => {
     const metadata = metadataByUrl.get(entry.url);
@@ -539,7 +533,6 @@ async function runAgentAndRespond(
   const agentThreadId = historyThreadId ?? thread.id;
   try {
     const textStream = await runAgent(agentThreadId, userText, {
-      slackUserId,
       requestScopeId,
       attachments,
     });
@@ -584,7 +577,7 @@ async function runAgentAndRespond(
     }
 
     if (thread.adapter.name === "slack") {
-      const showcaseCard = await buildCreatedEntriesShowcaseCard(fullText, slackUserId);
+      const showcaseCard = await buildCreatedEntriesShowcaseCard(fullText);
       if (showcaseCard) {
         await thread.post({
           card: showcaseCard,
@@ -594,7 +587,7 @@ async function runAgentAndRespond(
     }
   } catch (err) {
     if (err instanceof NotConnectedError) {
-      await thread.post(notConnectedMessage(slackUserId));
+      await thread.post(notConnectedMessage());
       return;
     }
     console.error("[contentful-bot] agent error:", err);
