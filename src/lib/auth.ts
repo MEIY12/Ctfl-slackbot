@@ -3,8 +3,10 @@ import Redis from "ioredis";
 
 export const MCP_TOKEN_URL = "https://mcp.contentful.com/token";
 export const MCP_AUTHORIZE_URL = "https://mcp.contentful.com/authorize";
+const MCP_REGISTER_URL = "https://mcp.contentful.com/register";
 
 const WORKSPACE_TOKEN_KEY = "ctfl-bot:oauth:workspace";
+const REGISTERED_CLIENT_KEY = "ctfl-bot:oauth:registered-client";
 const OAUTH_STATE_TTL = 60 * 10; // 10 minutes
 const TOKEN_TTL = 60 * 60 * 24 * 30; // 30 days
 
@@ -28,8 +30,52 @@ export function getAppUrl(): string {
   return "http://localhost:3000";
 }
 
-export function getClientId(): string {
-  return `${getAppUrl()}/api/auth/contentful/client`;
+interface RegisteredClient {
+  clientId: string;
+  registeredAt: number;
+}
+
+async function registerClient(redis: Redis): Promise<RegisteredClient> {
+  const res = await fetch(MCP_REGISTER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Contentful Slack Bot",
+      redirect_uris: [getRedirectUri()],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Dynamic client registration failed (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  const registered: RegisteredClient = {
+    clientId: data.client_id,
+    registeredAt: Date.now(),
+  };
+  await redis.set(REGISTERED_CLIENT_KEY, JSON.stringify(registered));
+  return registered;
+}
+
+export async function getOrRegisterClient(redis: Redis): Promise<string> {
+  const raw = await redis.get(REGISTERED_CLIENT_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as RegisteredClient;
+      if (parsed.clientId) return parsed.clientId;
+    } catch {
+      // fall through to re-register
+    }
+  }
+  const registered = await registerClient(redis);
+  return registered.clientId;
+}
+
+export async function clearRegisteredClient(redis: Redis): Promise<void> {
+  await redis.del(REGISTERED_CLIENT_KEY);
 }
 
 export function getRedirectUri(): string {
@@ -77,7 +123,7 @@ export async function clearToken(redis: Redis): Promise<void> {
 export async function storeOAuthState(
   redis: Redis,
   state: string,
-  data: { codeVerifier: string; slackUserId?: string }
+  data: { codeVerifier: string; clientId: string; slackUserId?: string }
 ): Promise<void> {
   await redis.set(
     `ctfl-bot:oauth-state:${state}`,
@@ -90,7 +136,7 @@ export async function storeOAuthState(
 export async function popOAuthState(
   redis: Redis,
   state: string
-): Promise<{ codeVerifier: string; slackUserId?: string } | null> {
+): Promise<{ codeVerifier: string; clientId: string; slackUserId?: string } | null> {
   const raw = await redis.get(`ctfl-bot:oauth-state:${state}`);
   if (!raw) return null;
   await redis.del(`ctfl-bot:oauth-state:${state}`);
@@ -126,6 +172,7 @@ export async function refreshTokenIfNeeded(
       (err.includes("invalid_client") || err.includes("invalid_grant"));
     if (isInvalidClient) {
       await clearToken(redis);
+      await clearRegisteredClient(redis);
       throw new TokenExpiredError(
         `Contentful client is no longer valid — please reconnect via /connect`
       );

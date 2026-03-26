@@ -3,7 +3,7 @@ import Redis from "ioredis";
 import { randomBytes } from "crypto";
 import {
   generatePKCE,
-  getClientId,
+  getOrRegisterClient,
   getRedirectUri,
   storeOAuthState,
   MCP_AUTHORIZE_URL,
@@ -15,14 +15,12 @@ export async function GET(req: NextRequest) {
   try {
     const { codeVerifier, codeChallenge } = generatePKCE();
     const state = randomBytes(16).toString("hex");
-
-    // Optionally carry the Slack user ID so we can refresh their home tab after connect
     const slackUserId = req.nextUrl.searchParams.get("uid") ?? undefined;
 
-    await storeOAuthState(redis, state, { codeVerifier, slackUserId });
-
-    const clientId = getClientId();
+    const clientId = await getOrRegisterClient(redis);
     const redirectUri = getRedirectUri();
+
+    await storeOAuthState(redis, state, { codeVerifier, clientId, slackUserId });
 
     const authUrl = new URL(MCP_AUTHORIZE_URL);
     authUrl.searchParams.set("response_type", "code");

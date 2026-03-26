@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import Redis from "ioredis";
 import {
-  getClientId,
   getRedirectUri,
   popOAuthState,
   storeToken,
@@ -130,8 +129,7 @@ export async function GET(req: NextRequest) {
       return html(ERROR_HTML("Invalid or expired state — please try again"), 400);
     }
 
-    const { codeVerifier } = stateData;
-    const clientId = getClientId();
+    const { codeVerifier, clientId } = stateData;
     const redirectUri = getRedirectUri();
 
     const tokenRes = await fetch(MCP_TOKEN_URL, {
