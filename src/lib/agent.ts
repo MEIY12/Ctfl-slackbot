@@ -201,33 +201,19 @@ async function runModelPass(input: {
   tools: NonNullable<Parameters<typeof streamText>[0]["tools"]>;
   maxSteps: number;
 }): Promise<{ text: string; messages: ModelMessage[] }> {
-  const streamedChunks: string[] = [];
-
-  return new Promise((resolve, reject) => {
-    const result = streamText({
-      model: input.model,
-      system: input.system,
-      messages: input.messages,
-      tools: input.tools,
-      stopWhen: stepCountIs(input.maxSteps),
-      onFinish: ({ response }) => {
-        const responseMessages = response.messages as ModelMessage[];
-        const responseText =
-          responseMessagesToText(responseMessages) || streamedChunks.join("").trim();
-        resolve({ text: responseText, messages: responseMessages });
-      },
-    });
-
-    void (async () => {
-      try {
-        for await (const chunk of result.textStream) {
-          streamedChunks.push(chunk);
-        }
-      } catch (error) {
-        reject(error);
-      }
-    })();
+  const result = streamText({
+    model: input.model,
+    system: input.system,
+    messages: input.messages,
+    tools: input.tools,
+    stopWhen: stepCountIs(input.maxSteps),
   });
+
+  const [text, response] = await Promise.all([result.text, result.response]);
+  const responseMessages = response.messages as ModelMessage[];
+  const responseText = responseMessagesToText(responseMessages) || text;
+
+  return { text: responseText, messages: responseMessages };
 }
 
 export function buildSystemPrompt(): string {
@@ -439,10 +425,22 @@ export async function runAgent(
       responseMessages: result.messages.length,
     });
 
-    await saveHistory(redis, threadId, [...updatedHistory, ...result.messages]);
-    await redis.set(responseKey, result.text, "EX", IDEMPOTENCY_TTL_SECONDS);
+    const responseText =
+      result.text ||
+      "I finished processing but wasn't able to produce a response. Could you try rephrasing your request?";
 
-    return singleMessageStream(result.text);
+    if (!result.text) {
+      console.warn("[agent] empty response text", {
+        threadId,
+        responseMessageRoles: result.messages.map((m) => m.role),
+        maxSteps,
+      });
+    }
+
+    await saveHistory(redis, threadId, [...updatedHistory, ...result.messages]);
+    await redis.set(responseKey, responseText, "EX", IDEMPOTENCY_TTL_SECONDS);
+
+    return singleMessageStream(responseText);
   } catch (error) {
     trace("run:error", {
       message: error instanceof Error ? error.message : "Unknown error",
