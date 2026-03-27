@@ -3,6 +3,7 @@ import { openai } from "@ai-sdk/openai";
 import {
   streamText,
   stepCountIs,
+  NoOutputGeneratedError,
   type ModelMessage,
   type UserContent,
 } from "ai";
@@ -195,10 +196,29 @@ async function runModelPass(input: {
     },
   });
 
-  const [text, response] = await Promise.all([result.text, result.response]);
-  const responseMessages = response.messages as ModelMessage[];
-  const responseText = responseMessagesToText(responseMessages) || text;
+  const [textSettled, responseSettled] = await Promise.allSettled([
+    result.text,
+    result.response,
+  ]);
 
+  const responseMessages =
+    responseSettled.status === "fulfilled"
+      ? (responseSettled.value.messages as ModelMessage[])
+      : [];
+
+  let text: string;
+  if (textSettled.status === "fulfilled") {
+    text = textSettled.value;
+  } else if (NoOutputGeneratedError.isInstance(textSettled.reason)) {
+    console.warn(
+      "[agent] no text output generated, extracting from response messages"
+    );
+    text = responseMessagesToText(responseMessages);
+  } else {
+    throw textSettled.reason;
+  }
+
+  const responseText = responseMessagesToText(responseMessages) || text;
   return { text: responseText, messages: responseMessages };
 }
 
