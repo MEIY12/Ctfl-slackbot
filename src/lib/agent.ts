@@ -260,7 +260,7 @@ Response style (always):
 Rich Text fields:
 - Contentful Rich Text is a structured document format, not plain text or Markdown. When populating a Rich Text field, produce a valid Contentful Rich Text document object with the correct nodeType/content structure (e.g. "document" root containing "paragraph", "heading-1" through "heading-6", "unordered-list", "ordered-list", "blockquote", "embedded-entry-block", "embedded-asset-block", etc.).
 - Do not pass a plain string or Markdown string to a Rich Text field — it will be rejected or silently corrupted.
-- Embedded entry and asset nodes within Rich Text require the full link shape: `{ nodeType: "embedded-entry-inline" | "embedded-entry-block" | "embedded-asset-block", data: { target: { sys: { type: "Link", linkType: "Entry" | "Asset", id: "<entryId>" } } }, content: [] }`. Resolve the entry/asset ID before constructing the node.
+- Embedded entry and asset nodes within Rich Text require the full link shape: \`{ nodeType: "embedded-entry-inline" | "embedded-entry-block" | "embedded-asset-block", data: { target: { sys: { type: "Link", linkType: "Entry" | "Asset", id: "<entryId>" } } }, content: [] }\`. Resolve the entry/asset ID before constructing the node.
 - When generating body copy for a landing page component or campaign page, use appropriate Rich Text nodes (headings, paragraphs, lists) rather than flattening everything into a single paragraph.
 
 Interaction flow:
