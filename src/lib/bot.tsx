@@ -1,33 +1,22 @@
 /** @jsxImportSource chat */
 import {
-  Actions,
-  Card,
-  CardText,
   Chat,
-  Divider,
-  LinkButton,
-  Section,
   emoji,
   type Attachment,
-  type CardElement,
   type Thread,
 } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { createRedisState } from "@chat-adapter/state-redis";
-import Redis from "ioredis";
 import {
   classifyPendingIntent,
   runAgent,
   NotConnectedError,
   type FileAttachment,
 } from "./agent";
-import { getConnectUrl, getStoredToken, refreshTokenIfNeeded } from "./auth";
+import { getConnectUrl } from "./auth";
 
 const PENDING_TTL_MS = 1000 * 60 * 60 * 24;
 const EXECUTION_ACK_MESSAGE = "Confirmed - executing now.";
-const MAX_SHOWCASE_ENTRIES = 6;
-const ENTRY_LINK_REGEX =
-  /https:\/\/app\.contentful\.com\/spaces\/[^/\s)]+\/entries\/[^/\s)]+/g;
 
 type PendingApproval = {
   threadId: string;
@@ -155,298 +144,6 @@ async function resolvePendingMessageId(threadId: string, userId?: string): Promi
   return null;
 }
 
-function truncateLabel(value: string, maxLength = 90): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
-}
-
-function extractCreatedEntryItems(summaryText: string): Array<{ label: string; url: string }> {
-  const lines = summaryText.split(/\r?\n/);
-  const sectionLines: string[] = [];
-  let inCreatedOrUpdated = false;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    const normalizedHeading = line
-      .toLowerCase()
-      .replace(/^[#\-\*\d\.\)\s]+/, "")
-      .replace(/[:\-]+$/, "")
-      .trim();
-
-    if (
-      normalizedHeading === "created/updated" ||
-      normalizedHeading === "created updated" ||
-      normalizedHeading === "created-updated"
-    ) {
-      inCreatedOrUpdated = true;
-      continue;
-    }
-
-    if (
-      inCreatedOrUpdated &&
-      (normalizedHeading === "outcome" ||
-        normalizedHeading === "verification" ||
-        normalizedHeading === "blockers")
-    ) {
-      break;
-    }
-
-    if (inCreatedOrUpdated) {
-      sectionLines.push(line);
-    }
-  }
-
-  const sourceLines = sectionLines.length > 0 ? sectionLines : lines;
-  const results: Array<{ label: string; url: string }> = [];
-  const seen = new Set<string>();
-
-  for (const line of sourceLines) {
-    const urls = line.match(ENTRY_LINK_REGEX) ?? [];
-    for (const url of urls) {
-      if (seen.has(url)) continue;
-      seen.add(url);
-
-      const markdownLinkMatch = line.match(
-        /\[([^\]]+)\]\((https:\/\/app\.contentful\.com\/spaces\/[^/\s)]+\/entries\/[^/\s)]+)\)/
-      );
-      const slackLinkMatch = line.match(
-        /<(https:\/\/app\.contentful\.com\/spaces\/[^|>]+\/entries\/[^|>]+)\|([^>]+)>/
-      );
-
-      let label = "";
-      if (markdownLinkMatch && markdownLinkMatch[2] === url) {
-        label = markdownLinkMatch[1] ?? "";
-      } else if (slackLinkMatch && slackLinkMatch[1] === url) {
-        label = slackLinkMatch[2] ?? "";
-      } else {
-        const urlIndex = line.indexOf(url);
-        if (urlIndex > 0) {
-          label = line.slice(0, urlIndex);
-        }
-      }
-
-      const fallbackLabel = "Created entry";
-      const cleaned = label
-        .replace(/^[\-\*\u2022]\s*/, "")
-        .replace(/^\d+[\.\)]\s*/, "")
-        .replace(/[:\-\u2014]\s*$/, "")
-        .trim();
-
-      results.push({ label: truncateLabel(cleaned || fallbackLabel), url });
-    }
-  }
-
-  return results;
-}
-
-type ResolvedEntryMeta = {
-  contentTypeId?: string;
-  title?: string;
-  preview?: string;
-};
-
-function parseEntryRefFromUrl(url: string): { spaceId: string; entryId: string } | null {
-  const match = url.match(/\/spaces\/([^/]+)\/entries\/([^/?#]+)/);
-  if (!match) return null;
-  return { spaceId: match[1], entryId: match[2] };
-}
-
-function pickEntryTitle(fields: unknown): string | null {
-  if (!fields || typeof fields !== "object") return null;
-  const record = fields as Record<string, unknown>;
-  const preferredKeys = ["title", "name", "internalName", "headline"];
-
-  for (const key of preferredKeys) {
-    const value = record[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (value && typeof value === "object") {
-      const localizedValues = Object.values(value as Record<string, unknown>);
-      const firstString = localizedValues.find(
-        (candidate) => typeof candidate === "string" && candidate.trim()
-      );
-      if (typeof firstString === "string") return firstString.trim();
-    }
-  }
-
-  for (const value of Object.values(record)) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (value && typeof value === "object") {
-      const localizedValues = Object.values(value as Record<string, unknown>);
-      const firstString = localizedValues.find(
-        (candidate) => typeof candidate === "string" && candidate.trim()
-      );
-      if (typeof firstString === "string") return firstString.trim();
-    }
-  }
-
-  return null;
-}
-
-function collectRichTextNodeText(node: unknown): string {
-  if (!node || typeof node !== "object") return "";
-  const record = node as Record<string, unknown>;
-  if (typeof record.value === "string") return record.value;
-  const content = Array.isArray(record.content) ? record.content : [];
-  return content.map((child) => collectRichTextNodeText(child)).join(" ");
-}
-
-function fieldValueToText(value: unknown): string | null {
-  if (typeof value === "string") return value.trim() || null;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    const joined = value
-      .map((item) => fieldValueToText(item))
-      .filter((item): item is string => Boolean(item))
-      .join(", ");
-    return joined.trim() || null;
-  }
-  if (!value || typeof value !== "object") return null;
-
-  const record = value as Record<string, unknown>;
-  if (record.nodeType === "document") {
-    const richText = collectRichTextNodeText(record).replace(/\s+/g, " ").trim();
-    return richText || null;
-  }
-
-  const localizedValues = Object.values(record)
-    .map((item) => fieldValueToText(item))
-    .filter((item): item is string => Boolean(item));
-  if (localizedValues.length > 0) return localizedValues[0];
-  return null;
-}
-
-function pickEntryPreview(fields: unknown, title?: string): string | null {
-  if (!fields || typeof fields !== "object") return null;
-  const record = fields as Record<string, unknown>;
-  const preferredKeys = ["summary", "description", "excerpt", "dek", "body", "content"];
-
-  for (const key of preferredKeys) {
-    const preview = fieldValueToText(record[key]);
-    if (preview && preview !== title) return preview;
-  }
-
-  for (const [key, value] of Object.entries(record)) {
-    if (["title", "name", "internalName", "headline"].includes(key)) continue;
-    const preview = fieldValueToText(value);
-    if (preview && preview !== title) return preview;
-  }
-
-  return null;
-}
-
-async function loadEntryMetadataForUrls(
-  urls: string[]
-): Promise<Map<string, ResolvedEntryMeta>> {
-  const metadata = new Map<string, ResolvedEntryMeta>();
-  const redisUrl = process.env.REDIS_URL;
-  if (!redisUrl || urls.length === 0) return metadata;
-
-  const redis = new Redis(redisUrl);
-  try {
-    const storedToken = await getStoredToken(redis);
-    if (!storedToken) return metadata;
-    const token = await refreshTokenIfNeeded(redis, storedToken);
-
-    await Promise.all(
-      urls.map(async (url) => {
-        const ref = parseEntryRefFromUrl(url);
-        if (!ref) return;
-
-        try {
-          const response = await fetch(
-            `https://api.contentful.com/spaces/${ref.spaceId}/entries/${ref.entryId}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token.accessToken}`,
-              },
-            }
-          );
-          if (!response.ok) return;
-
-          const json = (await response.json()) as {
-            fields?: unknown;
-            sys?: { contentType?: { sys?: { id?: string } } };
-          };
-          const contentTypeId = json.sys?.contentType?.sys?.id;
-          const title = pickEntryTitle(json.fields);
-          const preview = pickEntryPreview(json.fields, title ?? undefined);
-
-          metadata.set(url, {
-            contentTypeId: typeof contentTypeId === "string" ? contentTypeId : undefined,
-            title: title ?? undefined,
-            preview: preview ?? undefined,
-          });
-        } catch {
-          // Ignore individual metadata failures and keep card generation resilient.
-        }
-      })
-    );
-  } finally {
-    await redis.quit();
-  }
-
-  return metadata;
-}
-
-function buildEntryDisplayLabel(
-  fallbackLabel: string,
-  metadata?: ResolvedEntryMeta
-): string {
-  if (metadata?.contentTypeId && metadata.title) {
-    return `${metadata.contentTypeId}: ${metadata.title}`;
-  }
-  if (metadata?.title) return metadata.title;
-  if (metadata?.contentTypeId) return metadata.contentTypeId;
-  return fallbackLabel || "Created entry";
-}
-
-async function buildCreatedEntriesShowcaseCard(
-  summaryText: string
-): Promise<CardElement | null> {
-  const entries = extractCreatedEntryItems(summaryText);
-  if (entries.length === 0) return null;
-
-  const displayedEntries = entries.slice(0, MAX_SHOWCASE_ENTRIES);
-  const overflowCount = entries.length - displayedEntries.length;
-  const metadataByUrl = await loadEntryMetadataForUrls(
-    displayedEntries.map((entry) => entry.url)
-  );
-  const entrySections = displayedEntries.flatMap((entry, index) => {
-    const metadata = metadataByUrl.get(entry.url);
-    const resolvedLabel = buildEntryDisplayLabel(entry.label, metadata);
-    const preview = metadata?.preview ? truncateLabel(metadata.preview, 180) : null;
-    const sectionChildren = [
-      CardText(`${index + 1}. **${truncateLabel(resolvedLabel, 110)}**`),
-      ...(preview ? [CardText(`_${preview}_`)] : []),
-      Actions([
-        LinkButton({
-          label: "Open entry",
-          url: entry.url,
-        }),
-      ]),
-    ];
-
-    return [
-      Section(sectionChildren),
-      CardText(entry.url),
-      ...(index < displayedEntries.length - 1 ? [Divider()] : []),
-    ];
-  });
-
-  return Card({
-    title: "Created Content Entries",
-    subtitle: `${entries.length} created`,
-    children: [
-      CardText("Quick view of created entries."),
-      Divider(),
-      ...entrySections,
-      ...(overflowCount > 0 ? [CardText(`+${overflowCount} additional entries were created.`)] : []),
-    ],
-  });
-}
 
 async function clearPendingApproval(
   pendingMessageId: string,
@@ -514,8 +211,7 @@ async function tryHandlePendingExecution(
 
 // Run the agent and post its response. When isApproval is false (initial
 // request), store a pending approval so the user can ✅/❌ to trigger
-// execution. When isApproval is true, show a showcase card if the response
-// contains created entry links.
+// execution.
 //
 // historyThreadId: when provided (reaction context), use this for agent history
 // instead of thread.id, and collect the stream to text before posting because
@@ -537,25 +233,17 @@ async function runAgentAndRespond(
       attachments,
     });
 
-    const chunks: string[] = [];
-    const captureStream = async function* (): AsyncIterable<string> {
-      for await (const chunk of textStream) {
-        chunks.push(chunk);
-        yield chunk;
-      }
-    };
-
     let sent;
     if (historyThreadId) {
+      const chunks: string[] = [];
       for await (const chunk of textStream) {
         chunks.push(chunk);
       }
       sent = await thread.post({ markdown: chunks.join("") });
     } else {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sent = await thread.post(captureStream() as any);
+      sent = await thread.post(textStream as any);
     }
-    const fullText = chunks.join("");
 
     if (!isApproval) {
       const pending: PendingApproval = {
@@ -576,15 +264,6 @@ async function runAgentAndRespond(
       }
     }
 
-    if (thread.adapter.name === "slack") {
-      const showcaseCard = await buildCreatedEntriesShowcaseCard(fullText);
-      if (showcaseCard) {
-        await thread.post({
-          card: showcaseCard,
-          fallbackText: "Created content entries are available in the card above.",
-        });
-      }
-    }
   } catch (err) {
     if (err instanceof NotConnectedError) {
       await thread.post(notConnectedMessage());
