@@ -192,7 +192,7 @@ async function runModelPass(input: {
     tools: input.tools,
     stopWhen: stepCountIs(input.maxSteps),
     providerOptions: {
-      openai: { store: false },
+      openai: { store: false, strictJsonSchema: false },
     },
   });
 
