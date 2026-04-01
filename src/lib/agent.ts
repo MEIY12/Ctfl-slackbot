@@ -294,7 +294,7 @@ Execution summary format (after mutations):
   2) Created/Updated (group by type: campaign, pages, components, assets — include counts and links)
   3) Verification
   4) Blockers
-- Include only high-level counts and entry links in this format: https://app.contentful.com/spaces/{spaceId}/entries/{entryId}
+- List each entry as a hyperlinked title in Slack inline link format: <https://app.contentful.com/spaces/{spaceId}/entries/{entryId}|Entry Title>. Use the entry's actual title/name as the link text, not the URL or entry ID.
 - No component-by-component deep breakdown, long notes/assumptions, or next-step suggestions unless explicitly requested.`;
 }
 
