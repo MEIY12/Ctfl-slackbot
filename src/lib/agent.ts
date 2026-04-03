@@ -267,6 +267,19 @@ Field shape rules (create_entry and update_entry):
 - update_entry merges your fields with existing fields at the field-ID level — only pass the fields you want to change. However, for any field you do include, provide all locales that should exist for that field.
 - Use get_entry before update_entry to see the current field values and avoid accidentally losing data on multi-locale fields.
 
+update_entry correct call shape:
+  entryId: "abc123"
+  fields: {
+    "components": { "en-US": [ { "sys": { "type": "Link", "linkType": "Entry", "id": "comp1" } } ] },
+    "slug": { "en-US": "/my-page" }
+  }
+
+update_entry WRONG — these will fail:
+  ❌ { fields: { fields: { "title": ... } } }          // "No field with id 'fields' found" — never nest fields inside fields
+  ❌ { fields: { "title": "My Title" } }               // missing locale wrapper — always { "fieldId": { "en-US": value } }
+  ❌ { "title": { "en-US": "My Title" } }              // fields key missing — the top-level arg is always named "fields"
+  ❌ { fields: { "en-US": { "title": "My Title" } } }  // locale wraps the whole object, not individual fields
+
 Rich Text fields:
 - Rich Text must be a full document tree — never a plain string or Markdown. It must also be locale-wrapped like any other field: \`{ "body": { "en-US": { "nodeType": "document", "data": {}, "content": [...] } } }\`.
 - Every node requires all three keys: nodeType, data: {}, and content. Omitting data: {} will cause a validation error.
