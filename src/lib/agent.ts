@@ -317,11 +317,11 @@ update_entry WRONG — these will fail:
 - If create_entry or update_entry returns a validation error, immediately diagnose and retry without asking the user. Do not stop execution.
 - Parse the error message to locate the offending field, then apply the correct shape from the Field Shape Rules above and retry that single call.
 - Common errors and fixes:
-  - "Locale required" / missing locale → wrap the value: `{ "fieldId": { "en-US": <value> } }`
-  - "Expected type Link" → use `{ "sys": { "type": "Link", "linkType": "Entry", "id": "<id>" } }` not a raw ID string
-  - "fields is not valid" / nested fields → you passed `{ fields: { fields: { … } } }` — strip the outer `fields` key
+  - "Locale required" / missing locale → wrap the value: \`{ "fieldId": { "en-US": <value> } }\`
+  - "Expected type Link" → use \`{ "sys": { "type": "Link", "linkType": "Entry", "id": "<id>" } }\` not a raw ID string
+  - "fields is not valid" / nested fields → you passed \`{ fields: { fields: { … } } }\` — strip the outer \`fields\` key
   - "Required field missing" → fetch the content type definition, find the missing required field, supply a value, and retry
-  - "Unknown field" → you used a field ID that doesn't exist on this content type; fetch the content type and use only field IDs from its `fields` array
+  - "Unknown field" → you used a field ID that doesn't exist on this content type; fetch the content type and use only field IDs from its \`fields\` array
 - Retry limit: attempt up to 3 corrections per entry. If still failing after 3 retries, record the entry as a Blocker and continue with the rest of the campaign.
 - Never ask the user about a payload shape error. Handle it silently and only mention it in the Blockers section if it cannot be resolved after retries.
 
