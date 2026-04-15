@@ -98,6 +98,38 @@ function getRedis(): Redis {
   return new Redis(url);
 }
 
+/**
+ * Replace file and image parts in user messages with text placeholders before
+ * persisting to or reading from Redis. Node.js Buffers serialise to plain
+ * objects ({type:"Buffer",data:[...]}) via JSON.stringify, which fails the AI
+ * SDK ModelMessage schema check on the next load. The binary content was
+ * already consumed in the turn it arrived; keeping a text placeholder is
+ * sufficient for future-turn context. Running this on both save and load
+ * repairs any already-stored messages that contain raw Buffer objects.
+ */
+function stripBinaryContent(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((message) => {
+    if (message.role !== "user") return message;
+    if (typeof message.content === "string") return message;
+    if (!Array.isArray(message.content)) return message;
+    const sanitized = (message.content as unknown[]).map((part) => {
+      if (!part || typeof part !== "object") return part;
+      const p = part as Record<string, unknown>;
+      if (p.type === "file") {
+        const name = typeof p.filename === "string" ? p.filename : "file";
+        const mime = typeof p.mediaType === "string" ? p.mediaType : "unknown";
+        return { type: "text" as const, text: `[attached file: ${name} (${mime})]` };
+      }
+      if (p.type === "image") {
+        const mime = typeof p.mediaType === "string" ? p.mediaType : "image";
+        return { type: "text" as const, text: `[attached image (${mime})]` };
+      }
+      return part;
+    });
+    return { ...message, content: sanitized } as ModelMessage;
+  });
+}
+
 async function loadHistory(
   redis: Redis,
   threadId: string
@@ -105,7 +137,7 @@ async function loadHistory(
   const raw = await redis.get(`ctfl-bot:history:${threadId}`);
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as ModelMessage[];
+    return stripBinaryContent(JSON.parse(raw) as ModelMessage[]);
   } catch {
     return [];
   }
@@ -129,7 +161,7 @@ async function saveHistory(
   threadId: string,
   messages: ModelMessage[]
 ): Promise<void> {
-  const trimmed = trimHistory(messages, MAX_HISTORY_MESSAGES);
+  const trimmed = trimHistory(stripBinaryContent(messages), MAX_HISTORY_MESSAGES);
   await redis.set(
     `ctfl-bot:history:${threadId}`,
     JSON.stringify(trimmed),
