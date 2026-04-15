@@ -228,22 +228,12 @@ async function runAgentAndRespond(
 ): Promise<void> {
   const agentThreadId = historyThreadId ?? thread.id;
   try {
-    const textStream = await runAgent(agentThreadId, userText, {
+    const text = await runAgent(agentThreadId, userText, {
       requestScopeId,
       attachments,
     });
 
-    let sent;
-    if (historyThreadId) {
-      const chunks: string[] = [];
-      for await (const chunk of textStream) {
-        chunks.push(chunk);
-      }
-      sent = await thread.post({ markdown: chunks.join("") });
-    } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sent = await thread.post(textStream as any);
-    }
+    const sent = await thread.post({ markdown: text });
 
     if (!isApproval) {
       const pending: PendingApproval = {

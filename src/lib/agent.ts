@@ -1,9 +1,8 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { openai } from "@ai-sdk/openai";
 import {
-  streamText,
+  generateText,
   stepCountIs,
-  NoOutputGeneratedError,
   type ModelMessage,
   type UserContent,
 } from "ai";
@@ -189,83 +188,6 @@ function getStepCap(): number {
   return DEFAULT_STEP_CAP;
 }
 
-function messageContentToText(content: ModelMessage["content"]): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part: unknown) => {
-      if (typeof part === "string") return part;
-      if (!part || typeof part !== "object") return "";
-      const record = part as Record<string, unknown>;
-      if (record.type === "text" && typeof record.text === "string") {
-        return record.text;
-      }
-      if (record.type === "image") {
-        return `[image]`;
-      }
-      if (record.type === "file") {
-        const name = typeof record.filename === "string" ? record.filename : "file";
-        return `[file: ${name}]`;
-      }
-      if ("text" in record && typeof record.text === "string") {
-        return record.text;
-      }
-      return "";
-    })
-    .join("");
-}
-
-function responseMessagesToText(messages: ModelMessage[]): string {
-  return messages
-    .filter((message) => message.role === "assistant")
-    .map((message) => messageContentToText(message.content))
-    .join("\n")
-    .trim();
-}
-
-async function runModelPass(input: {
-  model: ReturnType<typeof openai>;
-  system: string;
-  messages: ModelMessage[];
-  tools: NonNullable<Parameters<typeof streamText>[0]["tools"]>;
-  maxSteps: number;
-}): Promise<{ text: string; messages: ModelMessage[] }> {
-  const result = streamText({
-    model: input.model,
-    system: input.system,
-    messages: input.messages,
-    tools: input.tools,
-    stopWhen: stepCountIs(input.maxSteps),
-    providerOptions: {
-      openai: { store: false, strictJsonSchema: false },
-    },
-  });
-
-  const [textSettled, responseSettled] = await Promise.allSettled([
-    result.text,
-    result.response,
-  ]);
-
-  const responseMessages =
-    responseSettled.status === "fulfilled"
-      ? (responseSettled.value.messages as ModelMessage[])
-      : [];
-
-  let text: string;
-  if (textSettled.status === "fulfilled") {
-    text = textSettled.value;
-  } else if (NoOutputGeneratedError.isInstance(textSettled.reason)) {
-    console.warn(
-      "[agent] no text output generated, extracting from response messages"
-    );
-    text = responseMessagesToText(responseMessages);
-  } else {
-    throw textSettled.reason;
-  }
-
-  const responseText = responseMessagesToText(responseMessages) || text;
-  return { text: responseText, messages: responseMessages };
-}
 
 export function buildSystemPrompt(): string {
   return `You are an expert content marketing agent operating inside Slack. Your role is to think and act like a senior content strategist and copywriter — one who can also execute fully inside a connected CMS (Contentful) via tools.
@@ -410,12 +332,6 @@ List each entry as a hyperlinked title in Slack inline link format: <https://app
 No component-by-component deep breakdown or next-step suggestions unless explicitly requested.`;
 }
 
-function singleMessageStream(message: string): AsyncIterable<string> {
-  return (async function* () {
-    yield message;
-  })();
-}
-
 export class NotConnectedError extends Error {
   constructor() {
     super("Contentful is not connected");
@@ -454,7 +370,7 @@ export async function runAgent(
     requestScopeId?: string;
     attachments?: FileAttachment[];
   }
-): Promise<AsyncIterable<string>> {
+): Promise<string> {
   const redis = getRedis();
   const shouldLogAgentTrace = process.env.AGENT_DEBUG === "1";
   const trace = (stage: string, details?: Record<string, unknown>): void => {
@@ -490,7 +406,7 @@ export async function runAgent(
   if (cachedResponse) {
     trace("run:cache-hit");
     await redis.quit();
-    return singleMessageStream(cachedResponse);
+    return cachedResponse;
   }
 
   if (!rawToken) {
@@ -508,9 +424,7 @@ export async function runAgent(
   if (!lockAcquired) {
     trace("run:lock-not-acquired");
     await redis.quit();
-    return singleMessageStream(
-      "This request is already running. Reply with `continue` in this thread to resume after the current run completes."
-    );
+    return "This request is already running. Reply with `continue` in this thread to resume after the current run completes.";
   }
   trace("run:lock-acquired");
 
@@ -547,19 +461,21 @@ export async function runAgent(
     const tools = await mcpClient.tools();
     trace("mcp:tools-loaded", { totalTools: Object.keys(tools).length });
 
-    const model = openai("gpt-5.4-mini");
     const maxSteps = getStepCap();
     trace("model:run:start", { messageCount: updatedHistory.length, maxSteps });
-    const result = await runModelPass({
-      model,
+    const result = await generateText({
+      model: openai("gpt-5.4-mini"),
       system: buildSystemPrompt(),
       messages: updatedHistory,
       tools,
-      maxSteps,
+      stopWhen: stepCountIs(maxSteps),
+      providerOptions: {
+        openai: { store: false, strictJsonSchema: false },
+      },
     });
     trace("model:run:done", {
       responseChars: result.text.length,
-      responseMessages: result.messages.length,
+      responseMessages: result.response.messages.length,
     });
 
     const responseText =
@@ -569,15 +485,18 @@ export async function runAgent(
     if (!result.text) {
       console.warn("[agent] empty response text", {
         threadId,
-        responseMessageRoles: result.messages.map((m) => m.role),
+        responseMessageRoles: result.response.messages.map((m) => m.role),
         maxSteps,
       });
     }
 
-    await saveHistory(redis, threadId, [...updatedHistory, ...result.messages]);
+    await saveHistory(redis, threadId, [
+      ...updatedHistory,
+      ...(result.response.messages as ModelMessage[]),
+    ]);
     await redis.set(responseKey, responseText, "EX", IDEMPOTENCY_TTL_SECONDS);
 
-    return singleMessageStream(responseText);
+    return responseText;
   } catch (error) {
     trace("run:error", {
       message: error instanceof Error ? error.message : "Unknown error",
