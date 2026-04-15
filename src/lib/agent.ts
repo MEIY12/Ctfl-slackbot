@@ -111,12 +111,25 @@ async function loadHistory(
   }
 }
 
+/**
+ * Trim history to at most maxMessages, always starting at a user-role message.
+ * A plain slice(-N) can orphan tool-result messages at index 0 (no matching
+ * assistant tool-call message), which causes structurally broken context on the
+ * next turn and is the primary driver of payload shape errors on message 2+.
+ */
+function trimHistory(messages: ModelMessage[], maxMessages: number): ModelMessage[] {
+  if (messages.length <= maxMessages) return messages;
+  const sliced = messages.slice(-maxMessages);
+  const firstUserIdx = sliced.findIndex((m) => m.role === "user");
+  return firstUserIdx > 0 ? sliced.slice(firstUserIdx) : sliced;
+}
+
 async function saveHistory(
   redis: Redis,
   threadId: string,
   messages: ModelMessage[]
 ): Promise<void> {
-  const trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
+  const trimmed = trimHistory(messages, MAX_HISTORY_MESSAGES);
   await redis.set(
     `ctfl-bot:history:${threadId}`,
     JSON.stringify(trimmed),
@@ -299,6 +312,18 @@ update_entry WRONG — these will fail:
   ❌ { fields: { "title": "My Title" } }               // missing locale wrapper
   ❌ { "title": { "en-US": "My Title" } }              // fields key missing at top level
   ❌ { fields: { "en-US": { "title": "My Title" } } }  // locale must wrap individual fields, not the whole object
+
+**Payload error recovery (automatic — never surface to user):**
+- If create_entry or update_entry returns a validation error, immediately diagnose and retry without asking the user. Do not stop execution.
+- Parse the error message to locate the offending field, then apply the correct shape from the Field Shape Rules above and retry that single call.
+- Common errors and fixes:
+  - "Locale required" / missing locale → wrap the value: `{ "fieldId": { "en-US": <value> } }`
+  - "Expected type Link" → use `{ "sys": { "type": "Link", "linkType": "Entry", "id": "<id>" } }` not a raw ID string
+  - "fields is not valid" / nested fields → you passed `{ fields: { fields: { … } } }` — strip the outer `fields` key
+  - "Required field missing" → fetch the content type definition, find the missing required field, supply a value, and retry
+  - "Unknown field" → you used a field ID that doesn't exist on this content type; fetch the content type and use only field IDs from its `fields` array
+- Retry limit: attempt up to 3 corrections per entry. If still failing after 3 retries, record the entry as a Blocker and continue with the rest of the campaign.
+- Never ask the user about a payload shape error. Handle it silently and only mention it in the Blockers section if it cannot be resolved after retries.
 
 **Rich Text fields:**
 - Rich Text must be a full document tree — never a plain string or Markdown. Locale-wrapped: \`{ "body": { "en-US": { "nodeType": "document", "data": {}, "content": [...] } } }\`.
