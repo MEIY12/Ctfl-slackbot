@@ -1,16 +1,6 @@
 ---
 name: chat-sdk
-description: >
-  Build multi-platform chat bots with Chat SDK (`chat` npm package). Use when developers want to
-  (1) Build a Slack, Teams, Google Chat, Discord, Telegram, GitHub, Linear, or WhatsApp bot,
-  (2) Use Chat SDK to handle mentions, direct messages, subscribed threads, reactions, slash
-  commands, cards, modals, files, or AI streaming,
-  (3) Set up webhook routes or multi-adapter bots,
-  (4) Send rich cards or streamed AI responses to chat platforms,
-  (5) Build or maintain a custom adapter or state adapter.
-  Triggers on "chat sdk", "chat bot", "slack bot", "teams bot", "google chat bot", "discord bot",
-  "telegram bot", "whatsapp bot", "@chat-adapter", "@chat-adapter/state-", "custom adapter",
-  "state adapter", "build adapter", and building bots that work across multiple chat platforms.
+description: Build multi-platform chat bots with Chat SDK (`chat` npm package). Use when developers want to build a Slack, Teams, Google Chat, Discord, Telegram, GitHub, Linear, or WhatsApp bot, handle mentions, direct messages, subscribed threads, reactions, slash commands, cards, modals, files, or AI streaming, set up webhook routes or multi-adapter bots, send rich cards or streamed AI responses to chat platforms, or build a custom adapter or state adapter.
 ---
 
 # Chat SDK
@@ -110,7 +100,7 @@ Read `node_modules/chat/docs/handling-events.mdx`, `node_modules/chat/docs/actio
 
 ## Streaming
 
-Pass any `AsyncIterable<string>` to `thread.post()` or `thread.stream()`. For AI SDK, prefer `result.fullStream` over `result.textStream` when available so step boundaries are preserved.
+Pass any `AsyncIterable<string>` to `thread.post()`. For AI SDK, prefer `result.fullStream` over `result.textStream` when available so step boundaries are preserved.
 
 ```typescript
 import { ToolLoopAgent } from "ai";
@@ -183,6 +173,10 @@ await thread.post(
 - `@resend/chat-sdk-adapter`
 - `@zernio/chat-sdk-adapter`
 - `chat-adapter-baileys`
+- `@liveblocks/chat-sdk-adapter`
+- `chat-adapter-sendblue`
+- `chat-adapter-zalo`
+- `chat-adapter-mattermost`
 
 ### Coming-soon platform entries
 

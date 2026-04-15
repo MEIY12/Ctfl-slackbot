@@ -1,6 +1,10 @@
 /** @jsxImportSource chat */
 import {
   Chat,
+  Card,
+  CardText,
+  Actions,
+  LinkButton,
   emoji,
   type Attachment,
   type Thread,
@@ -14,6 +18,7 @@ import {
   type FileAttachment,
 } from "./agent";
 import { getConnectUrl } from "./auth";
+import { publishHomeTab, handleDisconnect } from "./slack-home";
 
 const PENDING_TTL_MS = 1000 * 60 * 60 * 24;
 const EXECUTION_ACK_MESSAGE = "Confirmed - executing now.";
@@ -30,6 +35,7 @@ export const bot = new Chat({
     slack: createSlackAdapter(),
   },
   state: createRedisState(),
+  dedupeTtlMs: 600_000,
 });
 
 function notConnectedMessage(): string {
@@ -209,13 +215,12 @@ async function tryHandlePendingExecution(
   return true;
 }
 
-// Run the agent and post its response. When isApproval is false (initial
+// Run the agent and stream its response. When isApproval is false (initial
 // request), store a pending approval so the user can ✅/❌ to trigger
 // execution.
 //
 // historyThreadId: when provided (reaction context), use this for agent history
-// instead of thread.id, and collect the stream to text before posting because
-// reaction event threads have no _currentMessage and cannot stream.
+// instead of thread.id so history is scoped to the correct conversation.
 async function runAgentAndRespond(
   thread: Thread<unknown, unknown>,
   userText: string,
@@ -228,12 +233,13 @@ async function runAgentAndRespond(
 ): Promise<void> {
   const agentThreadId = historyThreadId ?? thread.id;
   try {
-    const text = await runAgent(agentThreadId, userText, {
+    await thread.startTyping();
+    const stream = await runAgent(agentThreadId, userText, {
       requestScopeId,
       attachments,
     });
 
-    const sent = await thread.post({ markdown: text });
+    const sent = await thread.post(stream);
 
     if (!isApproval) {
       const pending: PendingApproval = {
@@ -298,6 +304,33 @@ bot.onSubscribedMessage(async (thread, message) => {
     undefined,
     `message:${message.id}`,
     files
+  );
+});
+
+bot.onAppHomeOpened(async (event) => {
+  await publishHomeTab(event.userId);
+});
+
+bot.onSlashCommand("/connect", async (event) => {
+  const connectUrl = `${getConnectUrl()}?uid=${encodeURIComponent(event.user.userId)}`;
+  await event.channel.postEphemeral(
+    event.user,
+    <Card title="Connect Contentful">
+      <CardText>Click the button below to authorize this bot with your Contentful account.</CardText>
+      <Actions>
+        <LinkButton url={connectUrl} style="primary">Connect to Contentful</LinkButton>
+      </Actions>
+    </Card>,
+    { fallbackToDM: false }
+  );
+});
+
+bot.onSlashCommand("/disconnect", async (event) => {
+  await handleDisconnect(event.user.userId);
+  await event.channel.postEphemeral(
+    event.user,
+    "✅ Contentful has been disconnected from this workspace.",
+    { fallbackToDM: false }
   );
 });
 

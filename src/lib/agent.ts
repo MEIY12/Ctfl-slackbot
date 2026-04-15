@@ -1,7 +1,7 @@
 import { createMCPClient } from "@ai-sdk/mcp";
 import { openai } from "@ai-sdk/openai";
 import {
-  generateText,
+  ToolLoopAgent,
   stepCountIs,
   type ModelMessage,
   type UserContent,
@@ -370,7 +370,7 @@ export async function runAgent(
     requestScopeId?: string;
     attachments?: FileAttachment[];
   }
-): Promise<string> {
+): Promise<AsyncIterable<string>> {
   const redis = getRedis();
   const shouldLogAgentTrace = process.env.AGENT_DEBUG === "1";
   const trace = (stage: string, details?: Record<string, unknown>): void => {
@@ -406,7 +406,7 @@ export async function runAgent(
   if (cachedResponse) {
     trace("run:cache-hit");
     await redis.quit();
-    return cachedResponse;
+    return (async function* () { yield cachedResponse; })();
   }
 
   if (!rawToken) {
@@ -424,28 +424,30 @@ export async function runAgent(
   if (!lockAcquired) {
     trace("run:lock-not-acquired");
     await redis.quit();
-    return "This request is already running. Reply with `continue` in this thread to resume after the current run completes.";
+    return (async function* () {
+      yield "This request is already running. Reply with `continue` in this thread to resume after the current run completes.";
+    })();
   }
   trace("run:lock-acquired");
 
-  let token: StoredToken;
-  try {
-    token = await refreshTokenIfNeeded(redis, rawToken);
-  } catch (err) {
-    if (err instanceof TokenExpiredError) {
-      await redis.quit();
-      throw new NotConnectedError();
-    }
-    throw err;
-  }
-  const userContent = await buildUserContent(userMessage, options?.attachments);
-  const updatedHistory: ModelMessage[] = [
-    ...history,
-    { role: "user", content: userContent },
-  ];
-
   let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
   try {
+    let token: StoredToken;
+    try {
+      token = await refreshTokenIfNeeded(redis, rawToken);
+    } catch (err) {
+      if (err instanceof TokenExpiredError) {
+        throw new NotConnectedError();
+      }
+      throw err;
+    }
+
+    const userContent = await buildUserContent(userMessage, options?.attachments);
+    const updatedHistory: ModelMessage[] = [
+      ...history,
+      { role: "user", content: userContent },
+    ];
+
     trace("mcp:connect:start");
     mcpClient = await createMCPClient({
       transport: {
@@ -463,55 +465,67 @@ export async function runAgent(
 
     const maxSteps = getStepCap();
     trace("model:run:start", { messageCount: updatedHistory.length, maxSteps });
-    const result = await generateText({
+
+    const agent = new ToolLoopAgent({
       model: openai("gpt-5.4-mini"),
-      system: buildSystemPrompt(),
-      messages: updatedHistory,
+      instructions: buildSystemPrompt(),
       tools,
       stopWhen: stepCountIs(maxSteps),
       providerOptions: {
         openai: { store: false, strictJsonSchema: false },
       },
     });
-    trace("model:run:done", {
-      responseChars: result.text.length,
-      responseMessages: result.response.messages.length,
-    });
 
-    const responseText =
-      result.text ||
-      "I finished processing but wasn't able to produce a response. Could you try rephrasing your request?";
+    const streamResult = await agent.stream({ messages: updatedHistory });
 
-    if (!result.text) {
-      console.warn("[agent] empty response text", {
-        threadId,
-        responseMessageRoles: result.response.messages.map((m) => m.role),
-        maxSteps,
-      });
+    // Generator streams tokens to Chat SDK and performs cleanup after completion.
+    // Cleanup lives here (not in an outer finally) so it runs after the consumer
+    // finishes draining the stream, not when runAgent() returns.
+    async function* textWithCleanup(): AsyncGenerator<string> {
+      let accumulatedText = "";
+      try {
+        for await (const chunk of streamResult.textStream) {
+          accumulatedText += chunk;
+          yield chunk;
+        }
+        const response = await streamResult.response;
+        trace("model:run:done", {
+          responseChars: accumulatedText.length,
+          responseMessages: response.messages.length,
+        });
+        const responseText =
+          accumulatedText ||
+          "I finished processing but wasn't able to produce a response. Could you try rephrasing your request?";
+        if (!accumulatedText) {
+          console.warn("[agent] empty response text", { threadId, maxSteps });
+        }
+        await saveHistory(redis, threadId, [
+          ...updatedHistory,
+          ...(response.messages as ModelMessage[]),
+        ]);
+        await redis.set(responseKey, responseText, "EX", IDEMPOTENCY_TTL_SECONDS);
+      } finally {
+        try {
+          await redis.del(lockKey);
+        } catch {
+          // ignore idempotency lock cleanup errors
+        }
+        if (mcpClient) {
+          await mcpClient.close();
+        }
+        await redis.quit();
+      }
     }
 
-    await saveHistory(redis, threadId, [
-      ...updatedHistory,
-      ...(result.response.messages as ModelMessage[]),
-    ]);
-    await redis.set(responseKey, responseText, "EX", IDEMPOTENCY_TTL_SECONDS);
-
-    return responseText;
+    return textWithCleanup();
   } catch (error) {
     trace("run:error", {
       message: error instanceof Error ? error.message : "Unknown error",
     });
-    throw error;
-  } finally {
-    trace("run:cleanup");
-    try {
-      await redis.del(lockKey);
-    } catch {
-      // ignore idempotency lock cleanup errors
-    }
-    if (mcpClient) {
-      await mcpClient.close();
-    }
+    // Setup failed before stream started — clean up immediately.
+    try { await redis.del(lockKey); } catch { /* ignore */ }
+    if (mcpClient) { try { await mcpClient.close(); } catch { /* ignore */ } }
     await redis.quit();
+    throw error;
   }
 }
