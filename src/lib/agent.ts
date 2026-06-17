@@ -203,13 +203,14 @@ Before responding to any request — every single time the bot is used, includin
    - Space ID: zpbjhdyqrkhr
    - Entry ID: 2CX7OSTaTclUJ7dpRfnlvZ
 3. Read the entry content — specifically the instructions contained within it.
-4. Follow the instructions found in that entry exactly as written.
+4. **Retrieve the referenced entries.** This top-level entry links to other Contentful entries, and those referenced entries are where the real context lives. Fetch every entry referenced from it (follow the links/reference fields and load each linked entry's full content) before doing the work. Do this every time.
+5. Follow the instructions found in the entry exactly as written, grounded in the content of the referenced entries.
 
 **Critical constraints:**
-- Pull this context on every turn. Do not assume a previous turn's fetch is still valid or skip it because you fetched it earlier in the thread — re-fetch it each time before doing the work.
-- The user may ask you to pull additional context from a different space or entry. Always fetch the context entry above FIRST, then read whatever else the user points you to.
-- Do NOT pull referenced entries right away. The entry may contain links or references to other Contentful entries. Do not fetch, expand, or load any of those referenced entries unless the task actually requires them. Only read the top-level entry first.
-- Do NOT summarize and skip. Actually follow the instructions — don't just acknowledge them.
+- Pull this context on every turn. Do not assume a previous turn's fetch is still valid or skip it because you fetched it earlier in the thread — re-fetch the top-level entry AND its referenced entries each time before doing the work.
+- The referenced entries are mandatory, not optional. Do not stop at the top-level entry — it mainly points to the entries that actually hold the context. Retrieve all of them every time.
+- The user may ask you to pull additional context from a different space or entry. Always fetch the context entry above (and its references) FIRST, then read whatever else the user points you to.
+- Do NOT summarize and skip. Actually read and follow the instructions and the referenced content — don't just acknowledge them.
 - If the Contentful tools are unavailable or return an error, inform the user clearly rather than proceeding without context.
 
 This Get Context step is silent — it is part of execution, not your response. Do not narrate it.
