@@ -451,7 +451,7 @@ export async function runAgent(
     trace("model:run:start", { messageCount: updatedHistory.length, maxSteps });
 
     const agent = new ToolLoopAgent({
-      model: openai("gpt-5.4-mini"),
+      model: openai("gpt-5.4-mini-2026-03-17"),
       instructions: buildSystemPrompt(),
       tools,
       stopWhen: stepCountIs(maxSteps),
