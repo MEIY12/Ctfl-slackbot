@@ -8,12 +8,21 @@ import {
 } from "ai";
 import { createHash } from "crypto";
 import Redis from "ioredis";
-import { getStoredToken, refreshTokenIfNeeded, TokenExpiredError, type StoredToken } from "./auth";
+import {
+  getPalmataToken,
+  getStoredToken,
+  refreshPalmataTokenIfNeeded,
+  refreshTokenIfNeeded,
+  TokenExpiredError,
+  type StoredToken,
+} from "./auth";
 
 const HISTORY_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const MAX_HISTORY_MESSAGES = 40;
 const IDEMPOTENCY_TTL_SECONDS = 60 * 10; // 10 minutes
 const DEFAULT_STEP_CAP = 30;
+type MCPClient = Awaited<ReturnType<typeof createMCPClient>>;
+type MCPTools = Awaited<ReturnType<MCPClient["tools"]>>;
 
 export type FileAttachment = {
   data: Buffer;
@@ -392,14 +401,16 @@ export async function runAgent(
     requestScopeId: requestScopeId ?? null,
   });
 
-  const [rawToken, history, cachedResponse] = await Promise.all([
+  const [rawToken, palmataToken, history, cachedResponse] = await Promise.all([
     getStoredToken(redis),
+    getPalmataToken(redis),
     loadHistory(redis, threadId),
     redis.get(responseKey),
   ]);
   trace("run:loaded-state", {
     historyCount: history.length,
-    hasToken: Boolean(rawToken),
+    hasContentfulToken: Boolean(rawToken),
+    hasPalmataToken: Boolean(palmataToken),
     hasCachedResponse: Boolean(cachedResponse),
   });
 
@@ -409,7 +420,7 @@ export async function runAgent(
     return (async function* () { yield cachedResponse; })();
   }
 
-  if (!rawToken) {
+  if (!rawToken && !palmataToken) {
     await redis.quit();
     throw new NotConnectedError();
   }
@@ -430,16 +441,19 @@ export async function runAgent(
   }
   trace("run:lock-acquired");
 
-  let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null;
+  const mcpClients: Array<Awaited<ReturnType<typeof createMCPClient>>> = [];
   try {
-    let token: StoredToken;
-    try {
-      token = await refreshTokenIfNeeded(redis, rawToken);
-    } catch (err) {
-      if (err instanceof TokenExpiredError) {
-        throw new NotConnectedError();
+    let token: StoredToken | null = rawToken;
+    if (rawToken) {
+      try {
+        token = await refreshTokenIfNeeded(redis, rawToken);
+      } catch (err) {
+        if (err instanceof TokenExpiredError) {
+          token = null;
+        } else {
+          throw err;
+        }
       }
-      throw err;
     }
 
     const userContent = await buildUserContent(userMessage, options?.attachments);
@@ -448,27 +462,80 @@ export async function runAgent(
       { role: "user", content: userContent },
     ];
 
-    trace("mcp:connect:start");
-    mcpClient = await createMCPClient({
-      transport: {
-        type: "http",
-        url: "https://mcp.contentful.com/mcp",
-        headers: {
-          Authorization: `Bearer ${token.accessToken}`,
-        },
-      },
-    });
-    trace("mcp:connect:ok");
+    let activePalmataToken = palmataToken;
+    if (palmataToken) {
+      try {
+        activePalmataToken = await refreshPalmataTokenIfNeeded(redis, palmataToken);
+      } catch (err) {
+        if (err instanceof TokenExpiredError) {
+          activePalmataToken = null;
+        } else {
+          throw err;
+        }
+      }
+    }
 
-    const tools = await mcpClient.tools();
-    trace("mcp:tools-loaded", { totalTools: Object.keys(tools).length });
+    trace("mcp:connect:start", {
+      contentful: Boolean(token),
+      palmata: Boolean(activePalmataToken),
+    });
+    let contentfulTools: MCPTools = {};
+    if (token) {
+      const contentfulClient = await createMCPClient({
+        transport: {
+          type: "http",
+          url: "https://mcp.contentful.com/mcp",
+          headers: {
+            Authorization: `Bearer ${token.accessToken}`,
+          },
+        },
+      });
+      mcpClients.push(contentfulClient);
+      contentfulTools = await contentfulClient.tools();
+    }
+    let palmataTools: MCPTools = {};
+    if (activePalmataToken) {
+      try {
+        const palmataClient = await createMCPClient({
+          transport: {
+            type: "http",
+            url: "https://mcp.palmata.ai/mcp",
+            headers: {
+              Authorization: `Bearer ${activePalmataToken.accessToken}`,
+            },
+          },
+        });
+        mcpClients.push(palmataClient);
+        palmataTools = await palmataClient.tools();
+      } catch (err) {
+        console.warn("[contentful-bot] Palmata MCP unavailable for this request:", err);
+      }
+    }
+
+    const tools = Object.fromEntries([
+      ...Object.entries(contentfulTools).map(([name, tool]) => [`contentful_${name}`, tool]),
+      ...Object.entries(palmataTools).map(([name, tool]) => [`palmata_${name}`, tool]),
+    ]);
+    trace("mcp:tools-loaded", {
+      contentful: Object.keys(contentfulTools).length,
+      palmata: Object.keys(palmataTools).length,
+      total: Object.keys(tools).length,
+    });
 
     const maxSteps = getStepCap();
     trace("model:run:start", { messageCount: updatedHistory.length, maxSteps });
 
     const agent = new ToolLoopAgent({
       model: openai("gpt-5.4-mini-2026-03-17"),
-      instructions: buildSystemPrompt(),
+      instructions: `${buildSystemPrompt()}
+
+## Connected MCP sources
+- Contentful tools are prefixed \`contentful_\` and provide CMS data and actions.
+- Palmata tools are prefixed \`palmata_\` and provide read-only AEO discovery/report data.
+- Contentful is ${Object.keys(contentfulTools).length > 0 ? "connected for this request" : "not available for this request"}.
+- Palmata is ${Object.keys(palmataTools).length > 0 ? "connected for this request" : "not available for this request"}.
+- Use both sources when the request could benefit from both. Never imply a source was consulted if it was unavailable.
+- In your final response, clearly summarize the useful findings from each source under concise source labels (for example, "*Contentful*" and "*Palmata*"), then give a combined recommendation or answer. If a source was not connected, say so briefly and include the /connect link when relevant.`,
       tools,
       stopWhen: stepCountIs(maxSteps),
       providerOptions: {
@@ -510,9 +577,7 @@ export async function runAgent(
         } catch {
           // ignore idempotency lock cleanup errors
         }
-        if (mcpClient) {
-          await mcpClient.close();
-        }
+        await Promise.all(mcpClients.map((client) => client.close()));
         await redis.quit();
       }
     }
@@ -524,7 +589,7 @@ export async function runAgent(
     });
     // Setup failed before stream started — clean up immediately.
     try { await redis.del(lockKey); } catch { /* ignore */ }
-    if (mcpClient) { try { await mcpClient.close(); } catch { /* ignore */ } }
+    await Promise.all(mcpClients.map((client) => client.close().catch(() => undefined)));
     await redis.quit();
     throw error;
   }

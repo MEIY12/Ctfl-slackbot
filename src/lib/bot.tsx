@@ -62,7 +62,10 @@ async function downloadAttachments(
   const results = await Promise.allSettled(
     eligible.map(async (a): Promise<FileAttachment | null> => {
       try {
-        const data = await a.fetchData!();
+        const rawData = await a.fetchData!();
+        const data = Buffer.isBuffer(rawData)
+          ? rawData
+          : Buffer.from(rawData as ArrayBuffer);
         if (data.length > MAX_ATTACHMENT_BYTES) {
           console.warn(
             `[contentful-bot] skipping oversized attachment: ${a.name ?? "unknown"} (${data.length} bytes)`

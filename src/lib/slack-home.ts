@@ -1,22 +1,27 @@
 import Redis from "ioredis";
-import { getStoredToken, clearToken } from "./auth";
+import { clearPalmataToken, clearToken, getPalmataToken, getStoredToken } from "./auth";
 
 const SLACK_API = "https://slack.com/api";
 
 export async function publishHomeTab(userId: string): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL!);
   let isConnected = false;
+  let statuses = { contentful: false, palmata: false };
 
   try {
-    const token = await getStoredToken(redis);
-    isConnected = !!token;
+    const [contentfulToken, palmataToken] = await Promise.all([
+      getStoredToken(redis),
+      getPalmataToken(redis),
+    ]);
+    isConnected = !!contentfulToken || !!palmataToken;
+    statuses = { contentful: !!contentfulToken, palmata: !!palmataToken };
   } finally {
     await redis.quit();
   }
 
   const view = {
     type: "home",
-    blocks: isConnected ? connectedBlocks() : disconnectedBlocks(),
+    blocks: isConnected ? connectedBlocks(statuses) : disconnectedBlocks(),
   };
 
   const res = await fetch(`${SLACK_API}/views.publish`, {
@@ -38,14 +43,17 @@ export async function handleDisconnect(userId: string): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL!);
   try {
     await clearToken(redis);
-    console.log("[contentful-bot] Contentful disconnected by user", userId);
+    await clearPalmataToken(redis);
+    console.log("[contentful-bot] Contentful and Palmata disconnected by user", userId);
   } finally {
     await redis.quit();
   }
   await publishHomeTab(userId);
 }
 
-function connectedBlocks() {
+function connectedBlocks(statuses: { contentful: boolean; palmata: boolean }) {
+  const contentfulStatus = statuses.contentful ? "✅ Connected" : "❌ Not connected";
+  const palmataStatus = statuses.palmata ? "✅ Connected" : "❌ Not connected";
   return [
     {
       type: "header",
@@ -55,7 +63,7 @@ function connectedBlocks() {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: "*Status:* ✅ Connected to Contentful\n\nThe bot is authorized and ready to manage content in this workspace.",
+        text: `*Status:*\n• Contentful: ${contentfulStatus}\n• Palmata: ${palmataStatus}\n\nThe bot uses both sources when answering questions and planning content.`,
       },
     },
     { type: "divider" },
@@ -70,7 +78,7 @@ function connectedBlocks() {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: "*Manage connection:*\nTo disconnect, run `/disconnect` in any channel.",
+        text: "*Manage connection:*\nRun `/connect` to authorize a missing service or `/disconnect` to disconnect both.",
       },
     },
     {

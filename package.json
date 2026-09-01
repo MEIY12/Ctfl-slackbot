@@ -9,17 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^1.0.21",
-    "@ai-sdk/openai": "^3.0.33",
-    "@chat-adapter/slack": "^4.20.2",
-    "@chat-adapter/state-redis": "^4.20.2",
-    "ai": "^6.0.100",
-    "chat": "^4.20.2",
+    "@ai-sdk/mcp": "^1.0.77",
+    "@ai-sdk/openai": "^3.0.106",
+    "@chat-adapter/slack": "^4.39.0",
+    "@chat-adapter/state-redis": "^4.39.0",
+    "ai": "^6.0.274",
+    "chat": "^4.39.0",
     "ioredis": "^5.9.3",
     "mammoth": "^1.12.0",
-    "next": "16.1.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "next": "^16.3.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,7 +28,7 @@
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "^16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

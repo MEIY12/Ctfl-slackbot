@@ -4,9 +4,14 @@ import Redis from "ioredis";
 export const MCP_TOKEN_URL = "https://mcp.contentful.com/token";
 export const MCP_AUTHORIZE_URL = "https://mcp.contentful.com/authorize";
 const MCP_REGISTER_URL = "https://mcp.contentful.com/register";
+export const PALMATA_TOKEN_URL = "https://mcp.palmata.ai/token";
+export const PALMATA_AUTHORIZE_URL = "https://mcp.palmata.ai/authorize";
+const PALMATA_REGISTER_URL = "https://mcp.palmata.ai/register";
 
 const WORKSPACE_TOKEN_KEY = "ctfl-bot:oauth:workspace";
 const REGISTERED_CLIENT_KEY = "ctfl-bot:oauth:registered-client";
+const PALMATA_TOKEN_KEY = "ctfl-bot:oauth:palmata";
+const PALMATA_REGISTERED_CLIENT_KEY = "ctfl-bot:oauth:palmata-registered-client";
 const OAUTH_STATE_TTL = 60 * 10; // 10 minutes
 const TOKEN_TTL = 60 * 60 * 24 * 30; // 30 days
 
@@ -16,6 +21,8 @@ export interface StoredToken {
   expiresAt: number;
   clientId: string;
 }
+
+export type PalmataToken = StoredToken;
 
 export class TokenExpiredError extends Error {
   constructor(message = "Stored token is no longer valid") {
@@ -82,6 +89,10 @@ export function getRedirectUri(): string {
   return `${getAppUrl()}/api/auth/contentful/callback`;
 }
 
+export function getPalmataRedirectUri(): string {
+  return `${getAppUrl()}/api/auth/palmata/callback`;
+}
+
 export function getConnectUrl(): string {
   return `${getAppUrl()}/connect`;
 }
@@ -118,6 +129,102 @@ export async function storeToken(
 
 export async function clearToken(redis: Redis): Promise<void> {
   await redis.del(WORKSPACE_TOKEN_KEY);
+}
+
+async function registerPalmataClient(redis: Redis): Promise<RegisteredClient> {
+  const res = await fetch(PALMATA_REGISTER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Contentful Slack Bot",
+      redirect_uris: [getPalmataRedirectUri()],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Palmata client registration failed (${res.status}): ${err}`);
+  }
+  const data = await res.json();
+  const registered: RegisteredClient = {
+    clientId: data.client_id,
+    registeredAt: Date.now(),
+  };
+  await redis.set(PALMATA_REGISTERED_CLIENT_KEY, JSON.stringify(registered));
+  return registered;
+}
+
+export async function getOrRegisterPalmataClient(redis: Redis): Promise<string> {
+  const raw = await redis.get(PALMATA_REGISTERED_CLIENT_KEY);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as RegisteredClient;
+      if (parsed.clientId) return parsed.clientId;
+    } catch {
+      // fall through to re-register
+    }
+  }
+  return (await registerPalmataClient(redis)).clientId;
+}
+
+export async function getPalmataToken(redis: Redis): Promise<PalmataToken | null> {
+  const raw = await redis.get(PALMATA_TOKEN_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PalmataToken;
+  } catch {
+    return null;
+  }
+}
+
+export async function storePalmataToken(redis: Redis, token: PalmataToken): Promise<void> {
+  await redis.set(PALMATA_TOKEN_KEY, JSON.stringify(token), "EX", TOKEN_TTL);
+}
+
+export async function clearPalmataToken(redis: Redis): Promise<void> {
+  await redis.del(PALMATA_TOKEN_KEY);
+}
+
+export async function clearPalmataClient(redis: Redis): Promise<void> {
+  await redis.del(PALMATA_REGISTERED_CLIENT_KEY);
+}
+
+export async function refreshPalmataTokenIfNeeded(
+  redis: Redis,
+  token: PalmataToken
+): Promise<PalmataToken> {
+  if (token.expiresAt > Date.now() + 5 * 60 * 1000) return token;
+
+  const res = await fetch(PALMATA_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: token.refreshToken,
+      client_id: token.clientId,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    if (res.status === 401 && (err.includes("invalid_client") || err.includes("invalid_grant"))) {
+      await clearPalmataToken(redis);
+      await clearPalmataClient(redis);
+      throw new TokenExpiredError("Palmata authorization expired — please reconnect via /connect");
+    }
+    throw new Error(`Palmata token refresh failed (${res.status}): ${err}`);
+  }
+
+  const data = await res.json();
+  const newToken: PalmataToken = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? token.refreshToken,
+    expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,
+    clientId: token.clientId,
+  };
+  await storePalmataToken(redis, newToken);
+  return newToken;
 }
 
 export async function storeOAuthState(

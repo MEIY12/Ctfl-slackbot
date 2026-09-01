@@ -41,3 +41,9 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 - When a thread is waiting for approval, free-form replies are interpreted semantically as approve, cancel, or unclear.
 - If a reply is unclear, the bot does not auto-execute and the conversation continues normally.
 - Users can always use ✅ to proceed or ❌ to cancel on the bot's pending message.
+
+## MCP connections
+
+Run `/connect` in Slack to authorize Contentful and Palmata separately. Contentful provides CMS read/write tools; Palmata provides read-only AEO discovery and report tools. Either connection is sufficient to use the bot, and when both are connected, one conversation can use both sources and the response labels the findings by source.
+
+Run `/disconnect` to remove both stored connections. Palmata's OAuth callback is `/api/auth/palmata/callback`, so the deployed `APP_URL` must be registered consistently with the other callback.
