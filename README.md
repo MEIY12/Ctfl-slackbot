@@ -87,7 +87,15 @@ Slack cannot call `localhost`. For complete local webhook and OAuth testing, exp
 
 Redis is required; the bot has no in-memory fallback. Use a dedicated database for each environment because it contains shared OAuth credentials and conversation state.
 
-For production, provision Redis through the [Vercel Marketplace](https://vercel.com/marketplace?category=storage) or another provider such as [Upstash](https://upstash.com/). This project uses `ioredis`, so `REDIS_URL` must be a TCP URL:
+The easiest production option is through the Vercel UI:
+
+1. Open the Vercel project and go to **Storage** or browse the [Vercel Marketplace](https://vercel.com/marketplace?category=storage).
+2. Select a Redis provider such as **Upstash for Redis**.
+3. Create or select a database and connect it to the project.
+4. In **Project Settings → Environment Variables**, confirm that `REDIS_URL` contains the database's TCP connection string. Add it manually from the provider's **Connect** screen if the integration only supplied REST variables.
+5. Redeploy so the new environment variable is available to the app.
+
+You can also provision Redis directly with [Upstash](https://upstash.com/) or another hosted provider. This project uses `ioredis`, so `REDIS_URL` must be a TCP URL:
 
 ```bash
 rediss://default:PASSWORD@HOST:PORT
