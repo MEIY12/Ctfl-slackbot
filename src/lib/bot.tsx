@@ -11,13 +11,14 @@ import {
 } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { createRedisState } from "@chat-adapter/state-redis";
+import Redis from "ioredis";
 import {
   classifyPendingIntent,
   runAgent,
   NotConnectedError,
   type FileAttachment,
 } from "./agent";
-import { getConnectUrl } from "./auth";
+import { getConnectUrl, getPalmataToken, getStoredToken } from "./auth";
 import { publishHomeTab, handleDisconnect } from "./slack-home";
 
 const PENDING_TTL_MS = 1000 * 60 * 60 * 24;
@@ -316,13 +317,40 @@ bot.onAppHomeOpened(async (event) => {
 
 bot.onSlashCommand("/connect", async (event) => {
   const connectUrl = `${getConnectUrl()}?uid=${encodeURIComponent(event.user.userId)}`;
+  const redis = new Redis(process.env.REDIS_URL!);
+  let contentfulConnected = false;
+  let palmataConnected = false;
+  try {
+    [contentfulConnected, palmataConnected] = await Promise.all([
+      getStoredToken(redis).then(Boolean),
+      getPalmataToken(redis).then(Boolean),
+    ]);
+  } finally {
+    await redis.quit();
+  }
+  const bothConnected = contentfulConnected && palmataConnected;
   await event.channel.postEphemeral(
     event.user,
-    <Card title="Connect Contentful">
-      <CardText>Click the button below to authorize this bot with your Contentful account.</CardText>
-      <Actions>
-        <LinkButton url={connectUrl} style="primary">Connect to Contentful</LinkButton>
-      </Actions>
+    <Card title="Connect Contentful and Palmata">
+      <CardText>
+        {bothConnected
+          ? "Both Contentful and Palmata are already connected. This bot can use both sources in one conversation."
+          : `Contentful: ${contentfulConnected ? "connected" : "not connected"} · Palmata: ${palmataConnected ? "connected" : "not connected"}`}
+      </CardText>
+      {!bothConnected && (
+        <Actions>
+          {!contentfulConnected && (
+            <LinkButton url={`${connectUrl}&service=contentful`} style="primary">
+              Connect Contentful
+            </LinkButton>
+          )}
+          {!palmataConnected && (
+            <LinkButton url={`${connectUrl}&service=palmata`} style="primary">
+              Connect Palmata
+            </LinkButton>
+          )}
+        </Actions>
+      )}
     </Card>,
     { fallbackToDM: false }
   );
