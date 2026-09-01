@@ -5,6 +5,7 @@ import {
   popOAuthState,
   storePalmataToken,
   PALMATA_TOKEN_URL,
+  PALMATA_RESOURCE_URL,
 } from "@/lib/auth";
 import { publishHomeTab } from "@/lib/slack-home";
 
@@ -43,6 +44,7 @@ export async function GET(req: NextRequest) {
         redirect_uri: getPalmataRedirectUri(),
         client_id: stateData.clientId,
         code_verifier: stateData.codeVerifier,
+        resource: PALMATA_RESOURCE_URL,
       }),
     });
     if (!tokenRes.ok) return errorHtml(`Token exchange failed: ${tokenRes.status}`);

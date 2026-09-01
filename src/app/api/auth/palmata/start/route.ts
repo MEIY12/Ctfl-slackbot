@@ -7,6 +7,7 @@ import {
   getPalmataRedirectUri,
   storeOAuthState,
   PALMATA_AUTHORIZE_URL,
+  PALMATA_RESOURCE_URL,
 } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest) {
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
+    authUrl.searchParams.set("resource", PALMATA_RESOURCE_URL);
 
     return NextResponse.redirect(authUrl.toString());
   } finally {

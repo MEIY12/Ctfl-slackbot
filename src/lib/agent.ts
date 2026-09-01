@@ -9,6 +9,7 @@ import {
 import { createHash } from "crypto";
 import Redis from "ioredis";
 import {
+  clearToken,
   getPalmataToken,
   getStoredToken,
   refreshPalmataTokenIfNeeded,
@@ -481,17 +482,26 @@ export async function runAgent(
     });
     let contentfulTools: MCPTools = {};
     if (token) {
-      const contentfulClient = await createMCPClient({
-        transport: {
-          type: "http",
-          url: "https://mcp.contentful.com/mcp",
-          headers: {
-            Authorization: `Bearer ${token.accessToken}`,
+      try {
+        const contentfulClient = await createMCPClient({
+          transport: {
+            type: "http",
+            url: "https://mcp.contentful.com/mcp",
+            headers: {
+              Authorization: `Bearer ${token.accessToken}`,
+            },
           },
-        },
-      });
-      mcpClients.push(contentfulClient);
-      contentfulTools = await contentfulClient.tools();
+        });
+        mcpClients.push(contentfulClient);
+        contentfulTools = await contentfulClient.tools();
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("401")) {
+          await clearToken(redis);
+          token = null;
+        } else {
+          throw err;
+        }
+      }
     }
     let palmataTools: MCPTools = {};
     if (activePalmataToken) {
@@ -521,6 +531,9 @@ export async function runAgent(
       palmata: Object.keys(palmataTools).length,
       total: Object.keys(tools).length,
     });
+    if (Object.keys(tools).length === 0) {
+      throw new NotConnectedError();
+    }
 
     const maxSteps = getStepCap();
     trace("model:run:start", { messageCount: updatedHistory.length, maxSteps });

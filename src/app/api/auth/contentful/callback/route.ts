@@ -5,6 +5,7 @@ import {
   popOAuthState,
   storeToken,
   MCP_TOKEN_URL,
+  MCP_RESOURCE_URL,
 } from "@/lib/auth";
 import { publishHomeTab } from "@/lib/slack-home";
 
@@ -141,6 +142,7 @@ export async function GET(req: NextRequest) {
         redirect_uri: redirectUri,
         client_id: clientId,
         code_verifier: codeVerifier,
+        resource: MCP_RESOURCE_URL,
       }),
     });
 
