@@ -255,17 +255,19 @@ Experiences live on content type \`nt_experience\` and are powered by a Contentf
 - \`nt_type\`: fixed value \`"nt_experiment"\` for an A/B test, \`"nt_personalization"\` for personalization. This field is disabled in the UI — set it programmatically, do not ask the user.
 - \`nt_experience_id\`: leave this field out of the create payload entirely. It is populated by the personalization app (observed equal to the entry's own \`sys.id\` after publish) — never invent or pre-fill a value.
 - \`nt_metadata\`: a fixed constant object, not per-entry data. Set it to exactly \`{ "type": "origin" }\` (locale-wrapped). Do not construct a different shape.
-- \`nt_config\`: an Object field whose shape depends on \`nt_type\`:
+- \`nt_config\`: an Object field whose shape depends on \`nt_type\`. In both cases, \`components\` is an ARRAY containing exactly one \`EntryReplacement\` object — never a bare object. Omitting the array wrapper is a real failure mode observed in this space (it breaks rendering) — always double-check \`components\` is \`[{ ... }]\`, not \`{ ... }\`.
   - \`nt_experiment\` (A/B test):
     \`\`\`json
     {
       "distribution": [0.5, 0.5],
       "traffic": 1,
-      "components": {
-        "type": "EntryReplacement",
-        "baseline": { "id": "<baselineEntryId>" },
-        "variants": [{ "id": "<variantEntryId>", "hidden": false }]
-      },
+      "components": [
+        {
+          "type": "EntryReplacement",
+          "baseline": { "id": "<baselineEntryId>" },
+          "variants": [{ "id": "<variantEntryId>", "hidden": false }]
+        }
+      ],
       "primaryMetric": "<metric-id>",
       "distributionType": "even-split"
     }
@@ -275,11 +277,13 @@ Experiences live on content type \`nt_experience\` and are powered by a Contentf
     \`\`\`json
     {
       "traffic": 1,
-      "components": {
-        "type": "EntryReplacement",
-        "baseline": { "id": "<baselineEntryId>", "title": "<baselineEntryTitle>" },
-        "variants": [{ "id": "<variantEntryId>", "hidden": false }]
-      },
+      "components": [
+        {
+          "type": "EntryReplacement",
+          "baseline": { "id": "<baselineEntryId>", "title": "<baselineEntryTitle>" },
+          "variants": [{ "id": "<variantEntryId>", "hidden": false }]
+        }
+      ],
       "distribution": [0.1, 0.9]
     }
     \`\`\`
@@ -290,7 +294,7 @@ Experiences live on content type \`nt_experience\` and are powered by a Contentf
   - \`nt_audience_id\`: leave out of the create payload, same as \`nt_experience_id\` — the app populates it (observed equal to the entry's own \`sys.id\`).
   - \`nt_metadata\`: same fixed constant as above, \`{ "type": "origin" }\`.
   - \`nt_rules\`: an app-generated rule-builder structure (\`any\` → \`all\` → \`conditions\`, each condition referencing a rule category like \`context_page_url\` with an \`operator\` and \`value\`) built by the personalization app's UI, not a simple filter the bot should compose from scratch. Because a malformed rule can silently fail to target anyone, do not invent a new \`nt_rules\` tree for real targeting logic (e.g. "customers who bought X," "visitors from a campaign") — instead, prefer reusing or duplicating the structure of an existing, working audience entry that already expresses similar targeting, and flag to the user that fine-tuning the exact rule may need to happen in the Contentful UI. Only compose \`nt_rules\` directly when mirroring a trivial, already-observed pattern (e.g. a catch-all "URL matches \`*\`" rule like "All Visitors" uses).
-- \`nt_variants\`: an Array of Links that must list the same entry IDs as \`nt_config.components.variants\`.
+- \`nt_variants\`: an Array of Links that must list the same entry IDs as \`nt_config.components[0].variants\`.
 - The baseline entry (the content being A/B tested, e.g. a \`banner\`) has its own reference field back to experiences (e.g. \`nt_experiences\`, an Array of Links). After creating the Experience entry, update the baseline entry to append a link to the new Experience entry — the attach step is not automatic. Use \`append_entry_field\` for this so existing links aren't lost.
 - Sequence: create/identify the variant entry (entry ID needed for \`nt_config\`), create/identify the baseline entry and audience entry, then create the \`nt_experience\` entry with all IDs resolved, then append the Experience's link onto the baseline entry's experiences field.
 
