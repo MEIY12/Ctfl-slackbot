@@ -7,7 +7,8 @@ export const MCP_RESOURCE_URL = "https://mcp.contentful.com/mcp";
 const MCP_REGISTER_URL = "https://mcp.contentful.com/register";
 export const PALMATA_TOKEN_URL = "https://mcp.palmata.ai/token";
 export const PALMATA_AUTHORIZE_URL = "https://mcp.palmata.ai/authorize";
-export const PALMATA_RESOURCE_URL = "https://mcp.palmata.ai/mcp";
+export const PALMATA_RESOURCE_URL = "https://mcp.palmata.ai";
+export const PALMATA_SCOPE = "read";
 const PALMATA_REGISTER_URL = "https://mcp.palmata.ai/register";
 
 const WORKSPACE_TOKEN_KEY = "ctfl-bot:oauth:workspace";
@@ -143,6 +144,7 @@ async function registerPalmataClient(redis: Redis): Promise<RegisteredClient> {
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
+      scope: PALMATA_SCOPE,
     }),
   });
   if (!res.ok) {
@@ -207,6 +209,7 @@ export async function refreshPalmataTokenIfNeeded(
       refresh_token: token.refreshToken,
       client_id: token.clientId,
       resource: PALMATA_RESOURCE_URL,
+      scope: PALMATA_SCOPE,
     }),
   });
   if (!res.ok) {
