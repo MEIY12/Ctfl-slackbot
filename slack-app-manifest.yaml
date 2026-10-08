@@ -1,0 +1,59 @@
+# Before importing, replace your-production-domain.example.com with the
+# deployment's stable, public production domain.
+_metadata:
+  major_version: 2
+  minor_version: 1
+
+display_information:
+  name: Contentful + Palmata Ops
+  description: Manage Contentful content and research Palmata insights from Slack.
+
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Contentful Ops Bot
+    always_online: false
+  slash_commands:
+    - command: /connect
+      description: Connect Contentful and Palmata to this workspace.
+      should_escape: false
+      url: https://your-production-domain.example.com/api/webhooks/slack
+    - command: /disconnect
+      description: Disconnect Contentful and Palmata from this workspace.
+      should_escape: false
+      url: https://your-production-domain.example.com/api/webhooks/slack
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - channels:read
+      - chat:write
+      - commands
+      - files:read
+      - groups:history
+      - groups:read
+      - reactions:read
+      - reactions:write
+      - users:read
+
+settings:
+  event_subscriptions:
+    request_url: https://your-production-domain.example.com/api/webhooks/slack
+    bot_events:
+      - app_home_opened
+      - app_mention
+      - message.channels
+      - message.groups
+      - reaction_added
+      - reaction_removed
+  interactivity:
+    is_enabled: true
+    request_url: https://your-production-domain.example.com/api/webhooks/slack
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

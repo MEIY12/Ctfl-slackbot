@@ -11,6 +11,8 @@ A Slack bot for Contentful content operations and Palmata AEO research. It uses:
 
 The bot responds to mentions, continues conversations in Slack threads, accepts supported file attachments, and requires approval before executing Contentful mutations.
 
+For a new hosted production deployment with no local setup, follow [`HOSTED_SETUP.md`](HOSTED_SETUP.md).
+
 ## Prerequisites
 
 - Node.js 20.9 or newer
@@ -107,11 +109,11 @@ Choose a Redis region close to the Vercel Function region when possible. The dat
 
 ## Slack app setup
 
-This project is a single-workspace Slack app. Create it at [api.slack.com/apps](https://api.slack.com/apps), then complete the following sections.
+This project is a single-workspace Slack app. For a new deployment, import [`slack-app-manifest.yaml`](slack-app-manifest.yaml) after replacing its example domain with the deployment's stable public origin. The settings below document what the manifest configures.
 
 ### 1. Create the app and permissions
 
-Create an app **From scratch**, add a bot user, and enable the App Home **Home Tab**. The Messages Tab is not required.
+At [api.slack.com/apps](https://api.slack.com/apps), create an app **From a manifest**. The manifest adds a bot user and enables the App Home **Home Tab**. The Messages Tab is not required.
 
 Under **OAuth & Permissions → Bot Token Scopes**, add:
 
