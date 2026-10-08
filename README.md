@@ -25,7 +25,7 @@ For a new hosted production deployment with no local setup, follow [`HOSTED_SETU
 
 ## Environment variables
 
-Create `.env.local` for local development. It is ignored by Git.
+The root [`.env.example`](.env.example) lists every supported variable. Copy it to `.env.local` for local development; `.env.local` is ignored by Git.
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
