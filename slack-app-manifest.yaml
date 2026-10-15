@@ -20,11 +20,11 @@ features:
     - command: /connect
       description: Connect Contentful and Palmata to this workspace.
       should_escape: false
-      url: https://your-production-domain.example.com/api/webhooks/slack
+      url: https://ctfl-slackbot-is17.vercel.app/api/webhooks/slack
     - command: /disconnect
       description: Disconnect Contentful and Palmata from this workspace.
       should_escape: false
-      url: https://your-production-domain.example.com/api/webhooks/slack
+      url: https://ctfl-slackbot-is17.vercel.app/api/webhooks/slack
 
 oauth_config:
   scopes:
@@ -43,7 +43,7 @@ oauth_config:
 
 settings:
   event_subscriptions:
-    request_url: https://your-production-domain.example.com/api/webhooks/slack
+    request_url: https://ctfl-slackbot-is17.vercel.app/api/webhooks/slack
     bot_events:
       - app_home_opened
       - app_mention
@@ -53,7 +53,7 @@ settings:
       - reaction_removed
   interactivity:
     is_enabled: true
-    request_url: https://your-production-domain.example.com/api/webhooks/slack
+    request_url: https://ctfl-slackbot-is17.vercel.app/api/webhooks/slack
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false
