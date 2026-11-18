@@ -17,7 +17,11 @@ export default async function ConnectPage({
   const contentfulRetryHref = `${appUrl}/api/auth/contentful/start?reset=1${
     uid ? `&uid=${encodeURIComponent(uid)}` : ""
   }`;
-  const palmataHref = `${appUrl}/api/auth/palmata/start${uidQuery}`;
+  const palmataStartParams = new URLSearchParams();
+  if (uid) palmataStartParams.set("uid", uid);
+  const palmataHref = `${appUrl}/api/auth/palmata/start${
+    palmataStartParams.toString() ? `?${palmataStartParams}` : ""
+  }`;
   const disconnectAction = `${appUrl}/api/auth/disconnect`;
 
   let contentfulConnected = false;
