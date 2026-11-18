@@ -1,5 +1,12 @@
 import Redis from "ioredis";
-import { clearPalmataToken, clearToken, getPalmataToken, getStoredToken } from "./auth";
+import {
+  clearPalmataClient,
+  clearPalmataToken,
+  clearRegisteredClient,
+  clearToken,
+  getPalmataToken,
+  getStoredToken,
+} from "./auth";
 
 const SLACK_API = "https://slack.com/api";
 
@@ -39,16 +46,27 @@ export async function publishHomeTab(userId: string): Promise<void> {
   }
 }
 
-export async function handleDisconnect(userId: string): Promise<void> {
+export async function handleDisconnect(userId?: string): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL!);
   try {
-    await clearToken(redis);
-    await clearPalmataToken(redis);
-    console.log("[contentful-bot] Contentful and Palmata disconnected by user", userId);
+    await Promise.all([
+      clearToken(redis),
+      clearPalmataToken(redis),
+      clearRegisteredClient(redis),
+      clearPalmataClient(redis),
+    ]);
+    console.log(
+      "[contentful-bot] Contentful and Palmata disconnected",
+      userId ? `by user ${userId}` : "via web"
+    );
   } finally {
     await redis.quit();
   }
-  await publishHomeTab(userId);
+  if (userId) {
+    void publishHomeTab(userId).catch((err) =>
+      console.error("[contentful-bot] home tab refresh after disconnect failed:", err)
+    );
+  }
 }
 
 function connectedBlocks(statuses: { contentful: boolean; palmata: boolean }) {

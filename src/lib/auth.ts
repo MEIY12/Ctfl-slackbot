@@ -214,7 +214,9 @@ export async function refreshPalmataTokenIfNeeded(
   });
   if (!res.ok) {
     const err = await res.text();
-    if (res.status === 401 && (err.includes("invalid_client") || err.includes("invalid_grant"))) {
+    const grantInvalid =
+      err.includes("invalid_grant") || err.includes("invalid_client");
+    if (grantInvalid) {
       await clearPalmataToken(redis);
       await clearPalmataClient(redis);
       throw new TokenExpiredError("Palmata authorization expired — please reconnect via /connect");
@@ -281,14 +283,13 @@ export async function refreshTokenIfNeeded(
 
   if (!res.ok) {
     const err = await res.text();
-    const isInvalidClient =
-      res.status === 401 &&
-      (err.includes("invalid_client") || err.includes("invalid_grant"));
-    if (isInvalidClient) {
+    const grantInvalid =
+      err.includes("invalid_grant") || err.includes("invalid_client");
+    if (grantInvalid) {
       await clearToken(redis);
       await clearRegisteredClient(redis);
       throw new TokenExpiredError(
-        `Contentful client is no longer valid — please reconnect via /connect`
+        `Contentful authorization expired — please reconnect via /connect`
       );
     }
     throw new Error(`Token refresh failed (${res.status}): ${err}`);

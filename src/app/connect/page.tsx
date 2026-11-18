@@ -5,9 +5,9 @@ import { getPalmataToken, getStoredToken } from "@/lib/auth";
 export default async function ConnectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ uid?: string }>;
+  searchParams: Promise<{ uid?: string; disconnected?: string }>;
 }) {
-  const { uid } = await searchParams;
+  const { uid, disconnected } = await searchParams;
   const startHref = uid
     ? `/api/auth/contentful/start?uid=${encodeURIComponent(uid)}`
     : "/api/auth/contentful/start";
@@ -95,10 +95,30 @@ export default async function ConnectPage({
               </p>
             </>
           )}
-          {contentfulConnected && palmataConnected && (
-            <p className="mt-2 text-center text-sm text-green-600 dark:text-green-400">
-              Both services are connected. You can close this page and return to Slack.
-            </p>
+          {(contentfulConnected || palmataConnected) && (
+            <div className="mt-4 space-y-3">
+              {contentfulConnected && palmataConnected && (
+                <p className="text-center text-sm text-green-600 dark:text-green-400">
+                  Both services are connected. You can close this page and return to Slack.
+                </p>
+              )}
+              {disconnected === "1" && (
+                <p className="text-center text-sm text-green-600 dark:text-green-400">
+                  Connections cleared. Authorize again below or run `/connect` in Slack.
+                </p>
+              )}
+              <form action="/api/auth/disconnect" method="post">
+                <button
+                  type="submit"
+                  className="block w-full rounded-lg border border-zinc-300 bg-white px-4 py-3 text-center text-sm font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 transition-colors dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+                >
+                  Disconnect Contentful and Palmata
+                </button>
+              </form>
+              <p className="text-center text-xs text-zinc-400 dark:text-zinc-500">
+                Use this if `/disconnect` in Slack fails, or you need a clean reconnect after an auth error.
+              </p>
+            </div>
           )}
         </div>
       </div>

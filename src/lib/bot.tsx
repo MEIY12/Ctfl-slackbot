@@ -357,12 +357,24 @@ bot.onSlashCommand("/connect", async (event) => {
 });
 
 bot.onSlashCommand("/disconnect", async (event) => {
-  await handleDisconnect(event.user.userId);
-  await event.channel.postEphemeral(
-    event.user,
-    "✅ Contentful has been disconnected from this workspace.",
-    { fallbackToDM: false }
-  );
+  const connectUrl = getConnectUrl();
+  const successMessage =
+    "✅ Contentful and Palmata have been disconnected for this bot. Run `/connect` to authorize again.";
+  try {
+    await handleDisconnect(event.user.userId);
+    const ephemeral = await event.channel.postEphemeral(event.user, successMessage, {
+      fallbackToDM: true,
+    });
+    if (!ephemeral) {
+      await event.channel.post(successMessage);
+    }
+  } catch (err) {
+    console.error("[contentful-bot] /disconnect failed:", err);
+    const errorMessage = `Could not disconnect (${err instanceof Error ? err.message : "unknown error"}). Reset at ${connectUrl}`;
+    await event.channel
+      .postEphemeral(event.user, errorMessage, { fallbackToDM: true })
+      .catch(() => event.channel.post(errorMessage));
+  }
 });
 
 // Handle ✅ (proceed) and ❌ (cancel) reactions on bot responses
