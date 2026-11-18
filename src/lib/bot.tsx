@@ -30,14 +30,39 @@ type PendingApproval = {
   pendingUserId?: string;
 };
 
-export const bot = new Chat({
-  userName: "contentful-bot",
-  adapters: {
-    slack: createSlackAdapter(),
-  },
-  state: createRedisState(),
-  dedupeTtlMs: 600_000,
-});
+let botSingleton: Chat | null = null;
+
+function botState() {
+  return getBot().getState();
+}
+
+/** Lazily initialized so `next build` does not require Slack secrets at import time. */
+export function getBot(): Chat {
+  if (botSingleton) return botSingleton;
+
+  const signingSecret = process.env.SLACK_SIGNING_SECRET;
+  if (!signingSecret) {
+    throw new Error(
+      "SLACK_SIGNING_SECRET is not set. Add it in Vercel → Settings → Environment Variables."
+    );
+  }
+
+  const bot = new Chat({
+    userName: "contentful-bot",
+    adapters: {
+      slack: createSlackAdapter({
+        signingSecret,
+        botToken: process.env.SLACK_BOT_TOKEN,
+      }),
+    },
+    state: createRedisState(),
+    dedupeTtlMs: 600_000,
+  });
+
+  registerHandlers(bot);
+  botSingleton = bot;
+  return bot;
+}
 
 function notConnectedMessage(): string {
   const connectUrl = getConnectUrl();
@@ -102,7 +127,7 @@ function pendingThreadIndexKey(threadId: string, userId?: string): string {
 }
 
 async function getPendingIndex(threadId: string, userId?: string): Promise<string[]> {
-  const state = bot.getState();
+  const state = botState();
   const existing = await state.get<string[]>(pendingThreadIndexKey(threadId, userId));
   return Array.isArray(existing) ? existing.filter((item) => typeof item === "string") : [];
 }
@@ -112,7 +137,7 @@ async function addPendingIndexEntry(
   pendingMessageId: string,
   userId?: string
 ): Promise<void> {
-  const state = bot.getState();
+  const state = botState();
   const current = await getPendingIndex(threadId, userId);
   const next = [...current.filter((id) => id !== pendingMessageId), pendingMessageId];
   await state.set(pendingThreadIndexKey(threadId, userId), next, PENDING_TTL_MS);
@@ -123,7 +148,7 @@ async function removePendingIndexEntry(
   pendingMessageId: string,
   userId?: string
 ): Promise<void> {
-  const state = bot.getState();
+  const state = botState();
   const current = await getPendingIndex(threadId, userId);
   const next = current.filter((id) => id !== pendingMessageId);
   if (next.length === 0) {
@@ -134,7 +159,7 @@ async function removePendingIndexEntry(
 }
 
 async function resolvePendingMessageId(threadId: string, userId?: string): Promise<string | null> {
-  const state = bot.getState();
+  const state = botState();
   const scopes: Array<{ threadId: string; userId?: string }> = [
     { threadId, userId },
     { threadId },
@@ -159,7 +184,7 @@ async function clearPendingApproval(
   pendingMessageId: string,
   pending: PendingApproval
 ): Promise<void> {
-  const state = bot.getState();
+  const state = botState();
   await state.delete(pendingMessageKey(pendingMessageId));
   await state.delete(pendingThreadKey(pending.threadId));
   await removePendingIndexEntry(pending.threadId, pendingMessageId);
@@ -176,7 +201,7 @@ async function tryHandlePendingExecution(
 ): Promise<boolean> {
   if (!userId) return false;
 
-  const state = bot.getState();
+  const state = botState();
   const pendingMessageId = await resolvePendingMessageId(thread.id, userId);
   if (!pendingMessageId) return false;
 
@@ -251,11 +276,11 @@ async function runAgentAndRespond(
         originalMessageId,
         pendingUserId: slackUserId,
       };
-      await bot.getState().set(pendingMessageKey(sent.id), pending, PENDING_TTL_MS);
-      await bot.getState().set(pendingThreadKey(agentThreadId), sent.id, PENDING_TTL_MS);
+      await botState().set(pendingMessageKey(sent.id), pending, PENDING_TTL_MS);
+      await botState().set(pendingThreadKey(agentThreadId), sent.id, PENDING_TTL_MS);
       await addPendingIndexEntry(agentThreadId, sent.id);
       if (slackUserId) {
-        await bot.getState().set(
+        await botState().set(
           pendingThreadKey(agentThreadId, slackUserId),
           sent.id,
           PENDING_TTL_MS
@@ -276,6 +301,7 @@ async function runAgentAndRespond(
   }
 }
 
+function registerHandlers(bot: Chat): void {
 bot.onNewMention(async (thread, message) => {
   await thread.subscribe();
   await thread.adapter.addReaction(thread.id, message.id, emoji.eyes);
@@ -384,7 +410,7 @@ bot.onReaction(["check", "x"], async (event) => {
 
   // Look up pending data by message ID — avoids thread ID mismatch between
   // where state was stored and the thread ID the reaction event carries.
-  const pending = await bot.getState().get<PendingApproval>(pendingMessageKey(event.messageId));
+  const pending = await botState().get<PendingApproval>(pendingMessageKey(event.messageId));
 
   if (!pending) return;
 
@@ -426,3 +452,4 @@ bot.onReaction(["check", "x"], async (event) => {
     true
   );
 });
+}

@@ -1,9 +1,8 @@
 import { after } from "next/server";
-import { bot } from "@/lib/bot";
+import { getBot } from "@/lib/bot";
 
 export const maxDuration = 300;
-
-type Platform = keyof typeof bot.webhooks;
+export const dynamic = "force-dynamic";
 
 export async function POST(
   request: Request,
@@ -11,6 +10,8 @@ export async function POST(
 ) {
   const { platform } = await context.params;
 
+  const bot = getBot();
+  type Platform = keyof typeof bot.webhooks;
   const handler = bot.webhooks[platform as Platform];
   if (!handler) {
     return new Response(`Unknown platform: ${platform}`, { status: 404 });
