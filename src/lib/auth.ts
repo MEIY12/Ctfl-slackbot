@@ -34,10 +34,29 @@ export class TokenExpiredError extends Error {
   }
 }
 
+function normalizeAppOrigin(value: string): string {
+  const trimmed = value.replace(/\/$/, "");
+  return trimmed.startsWith("http") ? trimmed : `https://${trimmed}`;
+}
+
+/** Stable public origin for OAuth callbacks and Slack links (never a ephemeral preview host). */
 export function getAppUrl(): string {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  if (process.env.APP_URL) return normalizeAppOrigin(process.env.APP_URL);
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  if (productionHost) return normalizeAppOrigin(productionHost);
+  if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";
+}
+
+export function isCanonicalAppHost(hostname: string): boolean {
+  try {
+    return new URL(getAppUrl()).hostname === hostname;
+  } catch {
+    return true;
+  }
 }
 
 interface RegisteredClient {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Redis from "ioredis";
-import { getPalmataToken, getStoredToken } from "@/lib/auth";
+import { getAppUrl, getPalmataToken, getStoredToken } from "@/lib/auth";
 
 export default async function ConnectPage({
   searchParams,
@@ -8,22 +8,30 @@ export default async function ConnectPage({
   searchParams: Promise<{ uid?: string; disconnected?: string }>;
 }) {
   const { uid, disconnected } = await searchParams;
-  const startHref = uid
-    ? `/api/auth/contentful/start?uid=${encodeURIComponent(uid)}`
-    : "/api/auth/contentful/start";
-  const palmataHref = uid
-    ? `/api/auth/palmata/start?uid=${encodeURIComponent(uid)}`
-    : "/api/auth/palmata/start";
-  const redis = new Redis(process.env.REDIS_URL!);
+  const appUrl = getAppUrl();
+  const uidQuery = uid ? `?uid=${encodeURIComponent(uid)}` : "";
+  const startHref = `${appUrl}/api/auth/contentful/start${uidQuery}`;
+  const palmataHref = `${appUrl}/api/auth/palmata/start${uidQuery}`;
+  const disconnectAction = `${appUrl}/api/auth/disconnect`;
+
   let contentfulConnected = false;
   let palmataConnected = false;
-  try {
-    [contentfulConnected, palmataConnected] = await Promise.all([
-      getStoredToken(redis).then(Boolean),
-      getPalmataToken(redis).then(Boolean),
-    ]);
-  } finally {
-    await redis.quit();
+  let configError: string | null = null;
+
+  if (!process.env.REDIS_URL) {
+    configError = "REDIS_URL is not set on this deployment.";
+  } else {
+    const redis = new Redis(process.env.REDIS_URL);
+    try {
+      [contentfulConnected, palmataConnected] = await Promise.all([
+        getStoredToken(redis).then(Boolean),
+        getPalmataToken(redis).then(Boolean),
+      ]);
+    } catch {
+      configError = "Could not reach Redis. Check REDIS_URL on Vercel.";
+    } finally {
+      await redis.quit();
+    }
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
@@ -53,6 +61,15 @@ export default async function ConnectPage({
               Authorize either service, or both, so the bot can manage Contentful content and answer AEO discovery questions directly from Slack.
             </p>
           </div>
+
+          {configError && (
+            <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-300">
+              {configError} Use the production URL:{" "}
+              <a href={appUrl} className="underline font-medium">
+                {appUrl}
+              </a>
+            </p>
+          )}
 
           <div className="mb-6 rounded-lg bg-zinc-50 dark:bg-zinc-800 px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300 space-y-1.5">
             <div className="flex items-start gap-2">
@@ -107,7 +124,7 @@ export default async function ConnectPage({
                   Connections cleared. Authorize again below or run `/connect` in Slack.
                 </p>
               )}
-              <form action="/api/auth/disconnect" method="post">
+              <form action={disconnectAction} method="post">
                 <button
                   type="submit"
                   className="block w-full rounded-lg border border-zinc-300 bg-white px-4 py-3 text-center text-sm font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 transition-colors dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
