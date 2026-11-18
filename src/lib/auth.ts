@@ -1,10 +1,25 @@
 import { createHash, randomBytes } from "crypto";
 import Redis from "ioredis";
 
-export const MCP_TOKEN_URL = "https://mcp.contentful.com/token";
-export const MCP_AUTHORIZE_URL = "https://mcp.contentful.com/authorize";
-export const MCP_RESOURCE_URL = "https://mcp.contentful.com/mcp";
-const MCP_REGISTER_URL = "https://mcp.contentful.com/register";
+export type ContentfulMcpRegion = "global" | "eu";
+
+/** Contentful MCP hosts — use EU when your org signs in at be.eu.contentful.com */
+export function getContentfulMcpRegion(): ContentfulMcpRegion {
+  return process.env.CONTENTFUL_MCP_REGION?.toLowerCase() === "eu" ? "eu" : "global";
+}
+
+export function getContentfulMcpEndpoints() {
+  const eu = getContentfulMcpRegion() === "eu";
+  const base = eu ? "https://mcp.eu.contentful.com" : "https://mcp.contentful.com";
+  return {
+    mcpUrl: `${base}/mcp`,
+    tokenUrl: `${base}/token`,
+    authorizeUrl: `${base}/authorize`,
+    registerUrl: `${base}/register`,
+    /** RFC 8707 resource indicator (matches Contentful PRM, not the /mcp path). */
+    oauthResource: base,
+  };
+}
 export const PALMATA_TOKEN_URL = "https://mcp.palmata.ai/token";
 export const PALMATA_AUTHORIZE_URL = "https://mcp.palmata.ai/authorize";
 export const PALMATA_RESOURCE_URL = "https://mcp.palmata.ai";
@@ -63,11 +78,13 @@ interface RegisteredClient {
   clientId: string;
   registeredAt: number;
   redirectUri?: string;
+  mcpRegion?: ContentfulMcpRegion;
 }
 
 async function registerClient(redis: Redis): Promise<RegisteredClient> {
   const redirectUri = getRedirectUri();
-  const res = await fetch(MCP_REGISTER_URL, {
+  const { registerUrl } = getContentfulMcpEndpoints();
+  const res = await fetch(registerUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -76,6 +93,7 @@ async function registerClient(redis: Redis): Promise<RegisteredClient> {
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
+      application_type: "web",
     }),
   });
   if (!res.ok) {
@@ -87,6 +105,7 @@ async function registerClient(redis: Redis): Promise<RegisteredClient> {
     clientId: data.client_id,
     registeredAt: Date.now(),
     redirectUri,
+    mcpRegion: getContentfulMcpRegion(),
   };
   await redis.set(REGISTERED_CLIENT_KEY, JSON.stringify(registered));
   return registered;
@@ -102,7 +121,11 @@ export async function getOrRegisterClient(redis: Redis): Promise<string> {
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as RegisteredClient;
-      if (parsed.clientId && parsed.redirectUri === redirectUri) {
+      if (
+        parsed.clientId &&
+        parsed.redirectUri === redirectUri &&
+        (parsed.mcpRegion ?? "global") === getContentfulMcpRegion()
+      ) {
         return parsed.clientId;
       }
     } catch {
@@ -306,14 +329,15 @@ export async function refreshTokenIfNeeded(
     return token;
   }
 
-  const res = await fetch(MCP_TOKEN_URL, {
+  const { tokenUrl, oauthResource } = getContentfulMcpEndpoints();
+  const res = await fetch(tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: token.refreshToken,
       client_id: token.clientId,
-      resource: MCP_RESOURCE_URL,
+      resource: oauthResource,
     }),
   });
 

@@ -8,8 +8,7 @@ import {
   getOrRegisterClient,
   getRedirectUri,
   storeOAuthState,
-  MCP_AUTHORIZE_URL,
-  MCP_RESOURCE_URL,
+  getContentfulMcpEndpoints,
 } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
@@ -35,14 +34,15 @@ export async function GET(req: NextRequest) {
 
     await storeOAuthState(redis, state, { codeVerifier, clientId, slackUserId });
 
-    const authUrl = new URL(MCP_AUTHORIZE_URL);
+    const { authorizeUrl, oauthResource } = getContentfulMcpEndpoints();
+    const authUrl = new URL(authorizeUrl);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
-    authUrl.searchParams.set("resource", MCP_RESOURCE_URL);
+    authUrl.searchParams.set("resource", oauthResource);
 
     return NextResponse.redirect(authUrl.toString());
   } catch (err) {

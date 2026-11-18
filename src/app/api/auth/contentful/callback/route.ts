@@ -4,8 +4,7 @@ import {
   getRedirectUri,
   popOAuthState,
   storeToken,
-  MCP_TOKEN_URL,
-  MCP_RESOURCE_URL,
+  getContentfulMcpEndpoints,
 } from "@/lib/auth";
 import { publishHomeTab } from "@/lib/slack-home";
 
@@ -133,7 +132,8 @@ export async function GET(req: NextRequest) {
     const { codeVerifier, clientId } = stateData;
     const redirectUri = getRedirectUri();
 
-    const tokenRes = await fetch(MCP_TOKEN_URL, {
+    const { tokenUrl, oauthResource } = getContentfulMcpEndpoints();
+    const tokenRes = await fetch(tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -142,7 +142,7 @@ export async function GET(req: NextRequest) {
         redirect_uri: redirectUri,
         client_id: clientId,
         code_verifier: codeVerifier,
-        resource: MCP_RESOURCE_URL,
+        resource: oauthResource,
       }),
     });
 

@@ -1,13 +1,35 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import Redis from "ioredis";
-import { getAppUrl, getPalmataToken, getStoredToken } from "@/lib/auth";
+import {
+  getAppUrl,
+  getContentfulMcpRegion,
+  getPalmataToken,
+  getStoredToken,
+} from "@/lib/auth";
 
 export default async function ConnectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ uid?: string; disconnected?: string; contentful_error?: string }>;
+  searchParams: Promise<{
+    uid?: string;
+    disconnected?: string;
+    contentful_error?: string;
+    service?: string;
+  }>;
 }) {
-  const { uid, disconnected, contentful_error } = await searchParams;
+  const { uid, disconnected, contentful_error, service } = await searchParams;
+
+  if (service === "contentful") {
+    const params = new URLSearchParams({ reset: "1" });
+    if (uid) params.set("uid", uid);
+    redirect(`/api/auth/contentful/start?${params.toString()}`);
+  }
+  if (service === "palmata") {
+    const params = new URLSearchParams();
+    if (uid) params.set("uid", uid);
+    redirect(`/api/auth/palmata/start?${params.toString()}`);
+  }
   const appUrl = getAppUrl();
   const contentfulStartParams = new URLSearchParams();
   if (uid) contentfulStartParams.set("uid", uid);
@@ -116,6 +138,19 @@ export default async function ConnectPage({
               >
                 Contentful failed before? Reset OAuth and try again
               </Link>
+              <ul className="mt-3 space-y-1 text-left text-xs text-zinc-500 dark:text-zinc-400 list-disc pl-5">
+                <li>Open in Chrome or Safari (not Slack’s in-app browser).</li>
+                <li>Install the <strong>Contentful MCP</strong> app on your space if prompted.</li>
+                <li>On the consent screen, select at least one <strong>space + environment</strong>.</li>
+                {getContentfulMcpRegion() === "eu" ? (
+                  <li>Using EU MCP region ({process.env.CONTENTFUL_MCP_REGION}).</li>
+                ) : (
+                  <li>
+                    EU org? Set <code className="font-mono">CONTENTFUL_MCP_REGION=eu</code> on Vercel and
+                    redeploy.
+                  </li>
+                )}
+              </ul>
               <p className="mt-4 text-center text-xs text-zinc-400 dark:text-zinc-500">
                 You will be redirected to Contentful to approve access. No passwords are stored.
               </p>

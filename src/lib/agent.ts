@@ -10,6 +10,7 @@ import { createHash } from "crypto";
 import Redis from "ioredis";
 import {
   clearToken,
+  getContentfulMcpEndpoints,
   getPalmataToken,
   getStoredToken,
   refreshPalmataTokenIfNeeded,
@@ -459,7 +460,7 @@ export async function runAgent(
         const contentfulClient = await createMCPClient({
           transport: {
             type: "http",
-            url: "https://mcp.contentful.com/mcp",
+            url: getContentfulMcpEndpoints().mcpUrl,
             headers: {
               Authorization: `Bearer ${token.accessToken}`,
             },

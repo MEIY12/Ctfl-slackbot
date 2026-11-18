@@ -19,6 +19,13 @@ import {
   type FileAttachment,
 } from "./agent";
 import { getConnectUrl, getPalmataToken, getStoredToken } from "./auth";
+
+function serviceConnectUrl(service: "contentful" | "palmata", slackUserId?: string): string {
+  const url = new URL(getConnectUrl());
+  if (slackUserId) url.searchParams.set("uid", slackUserId);
+  url.searchParams.set("service", service);
+  return url.toString();
+}
 import { publishHomeTab, handleDisconnect } from "./slack-home";
 
 const PENDING_TTL_MS = 1000 * 60 * 60 * 24;
@@ -342,7 +349,8 @@ bot.onAppHomeOpened(async (event) => {
 });
 
 bot.onSlashCommand("/connect", async (event) => {
-  const connectUrl = `${getConnectUrl()}?uid=${encodeURIComponent(event.user.userId)}`;
+  const contentfulConnectUrl = serviceConnectUrl("contentful", event.user.userId);
+  const palmataConnectUrl = serviceConnectUrl("palmata", event.user.userId);
   const redis = new Redis(process.env.REDIS_URL!);
   let contentfulConnected = false;
   let palmataConnected = false;
@@ -366,12 +374,12 @@ bot.onSlashCommand("/connect", async (event) => {
       {!bothConnected && (
         <Actions>
           {!contentfulConnected && (
-            <LinkButton url={`${connectUrl}&service=contentful`} style="primary">
+            <LinkButton url={contentfulConnectUrl} style="primary">
               Connect Contentful
             </LinkButton>
           )}
           {!palmataConnected && (
-            <LinkButton url={`${connectUrl}&service=palmata`} style="primary">
+            <LinkButton url={palmataConnectUrl} style="primary">
               Connect Palmata
             </LinkButton>
           )}
