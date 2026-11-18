@@ -149,7 +149,14 @@ export async function GET(req: NextRequest) {
     if (!tokenRes.ok) {
       const err = await tokenRes.text();
       console.error("[contentful-bot] token exchange failed:", err);
-      return html(ERROR_HTML(`Token exchange failed: ${tokenRes.status}`), 500);
+      const hint =
+        err.includes("invalid_client") || err.includes("invalid_grant")
+          ? " Try Authorize with Contentful again using the retry link on the connect page."
+          : "";
+      return html(
+        ERROR_HTML(`Token exchange failed (${tokenRes.status}): ${err.slice(0, 280)}${hint}`),
+        500
+      );
     }
 
     const tokenData = await tokenRes.json();

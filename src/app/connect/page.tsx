@@ -5,12 +5,18 @@ import { getAppUrl, getPalmataToken, getStoredToken } from "@/lib/auth";
 export default async function ConnectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ uid?: string; disconnected?: string }>;
+  searchParams: Promise<{ uid?: string; disconnected?: string; contentful_error?: string }>;
 }) {
-  const { uid, disconnected } = await searchParams;
+  const { uid, disconnected, contentful_error } = await searchParams;
   const appUrl = getAppUrl();
-  const uidQuery = uid ? `?uid=${encodeURIComponent(uid)}` : "";
-  const startHref = `${appUrl}/api/auth/contentful/start${uidQuery}`;
+  const contentfulStartParams = new URLSearchParams();
+  if (uid) contentfulStartParams.set("uid", uid);
+  const startHref = `${appUrl}/api/auth/contentful/start${
+    contentfulStartParams.toString() ? `?${contentfulStartParams}` : ""
+  }`;
+  const contentfulRetryHref = `${appUrl}/api/auth/contentful/start?reset=1${
+    uid ? `&uid=${encodeURIComponent(uid)}` : ""
+  }`;
   const palmataHref = `${appUrl}/api/auth/palmata/start${uidQuery}`;
   const disconnectAction = `${appUrl}/api/auth/disconnect`;
 
@@ -62,6 +68,12 @@ export default async function ConnectPage({
             </p>
           </div>
 
+          {contentful_error && (
+            <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-300">
+              Contentful authorization error: {contentful_error}
+            </p>
+          )}
+
           {configError && (
             <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-300">
               {configError} Use the production URL:{" "}
@@ -93,6 +105,12 @@ export default async function ConnectPage({
                 className="block w-full rounded-lg bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
               >
                 Authorize with Contentful
+              </Link>
+              <Link
+                href={contentfulRetryHref}
+                className="mt-2 block w-full text-center text-xs font-medium text-blue-700 underline dark:text-blue-300"
+              >
+                Contentful failed before? Reset OAuth and try again
               </Link>
               <p className="mt-4 text-center text-xs text-zinc-400 dark:text-zinc-500">
                 You will be redirected to Contentful to approve access. No passwords are stored.

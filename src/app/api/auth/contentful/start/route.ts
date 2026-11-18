@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import Redis from "ioredis";
 import { randomBytes } from "crypto";
 import {
+  clearContentfulOAuth,
   generatePKCE,
+  getConnectUrl,
   getOrRegisterClient,
   getRedirectUri,
   storeOAuthState,
@@ -11,9 +13,19 @@ import {
 } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
-  const redis = new Redis(process.env.REDIS_URL!);
+  if (!process.env.REDIS_URL) {
+    return NextResponse.redirect(
+      `${getConnectUrl()}?contentful_error=${encodeURIComponent("REDIS_URL is not configured")}`
+    );
+  }
+
+  const redis = new Redis(process.env.REDIS_URL);
 
   try {
+    if (req.nextUrl.searchParams.get("reset") === "1") {
+      await clearContentfulOAuth(redis);
+    }
+
     const { codeVerifier, codeChallenge } = generatePKCE();
     const state = randomBytes(16).toString("hex");
     const slackUserId = req.nextUrl.searchParams.get("uid") ?? undefined;
@@ -33,6 +45,13 @@ export async function GET(req: NextRequest) {
     authUrl.searchParams.set("resource", MCP_RESOURCE_URL);
 
     return NextResponse.redirect(authUrl.toString());
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Could not start Contentful authorization";
+    console.error("[contentful-bot] contentful OAuth start failed:", err);
+    return NextResponse.redirect(
+      `${getConnectUrl()}?contentful_error=${encodeURIComponent(message)}`
+    );
   } finally {
     await redis.quit();
   }

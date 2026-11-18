@@ -1,9 +1,8 @@
 import Redis from "ioredis";
 import {
+  clearContentfulOAuth,
   clearPalmataClient,
   clearPalmataToken,
-  clearRegisteredClient,
-  clearToken,
   getPalmataToken,
   getStoredToken,
 } from "./auth";
@@ -50,9 +49,8 @@ export async function handleDisconnect(userId?: string): Promise<void> {
   const redis = new Redis(process.env.REDIS_URL!);
   try {
     await Promise.all([
-      clearToken(redis),
+      clearContentfulOAuth(redis),
       clearPalmataToken(redis),
-      clearRegisteredClient(redis),
       clearPalmataClient(redis),
     ]);
     console.log(

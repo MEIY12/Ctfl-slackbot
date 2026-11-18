@@ -62,15 +62,17 @@ export function isCanonicalAppHost(hostname: string): boolean {
 interface RegisteredClient {
   clientId: string;
   registeredAt: number;
+  redirectUri?: string;
 }
 
 async function registerClient(redis: Redis): Promise<RegisteredClient> {
+  const redirectUri = getRedirectUri();
   const res = await fetch(MCP_REGISTER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_name: "Contentful Slack Bot",
-      redirect_uris: [getRedirectUri()],
+      redirect_uris: [redirectUri],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
@@ -84,21 +86,30 @@ async function registerClient(redis: Redis): Promise<RegisteredClient> {
   const registered: RegisteredClient = {
     clientId: data.client_id,
     registeredAt: Date.now(),
+    redirectUri,
   };
   await redis.set(REGISTERED_CLIENT_KEY, JSON.stringify(registered));
   return registered;
 }
 
+export async function clearContentfulOAuth(redis: Redis): Promise<void> {
+  await Promise.all([clearToken(redis), clearRegisteredClient(redis)]);
+}
+
 export async function getOrRegisterClient(redis: Redis): Promise<string> {
+  const redirectUri = getRedirectUri();
   const raw = await redis.get(REGISTERED_CLIENT_KEY);
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as RegisteredClient;
-      if (parsed.clientId) return parsed.clientId;
+      if (parsed.clientId && parsed.redirectUri === redirectUri) {
+        return parsed.clientId;
+      }
     } catch {
       // fall through to re-register
     }
   }
+  await clearContentfulOAuth(redis);
   const registered = await registerClient(redis);
   return registered.clientId;
 }
@@ -154,12 +165,13 @@ export async function clearToken(redis: Redis): Promise<void> {
 }
 
 async function registerPalmataClient(redis: Redis): Promise<RegisteredClient> {
+  const redirectUri = getPalmataRedirectUri();
   const res = await fetch(PALMATA_REGISTER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_name: "Contentful Slack Bot",
-      redirect_uris: [getPalmataRedirectUri()],
+      redirect_uris: [redirectUri],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
@@ -174,21 +186,26 @@ async function registerPalmataClient(redis: Redis): Promise<RegisteredClient> {
   const registered: RegisteredClient = {
     clientId: data.client_id,
     registeredAt: Date.now(),
+    redirectUri,
   };
   await redis.set(PALMATA_REGISTERED_CLIENT_KEY, JSON.stringify(registered));
   return registered;
 }
 
 export async function getOrRegisterPalmataClient(redis: Redis): Promise<string> {
+  const redirectUri = getPalmataRedirectUri();
   const raw = await redis.get(PALMATA_REGISTERED_CLIENT_KEY);
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as RegisteredClient;
-      if (parsed.clientId) return parsed.clientId;
+      if (parsed.clientId && parsed.redirectUri === redirectUri) {
+        return parsed.clientId;
+      }
     } catch {
       // fall through to re-register
     }
   }
+  await Promise.all([clearPalmataToken(redis), clearPalmataClient(redis)]);
   return (await registerPalmataClient(redis)).clientId;
 }
 
@@ -305,8 +322,7 @@ export async function refreshTokenIfNeeded(
     const grantInvalid =
       err.includes("invalid_grant") || err.includes("invalid_client");
     if (grantInvalid) {
-      await clearToken(redis);
-      await clearRegisteredClient(redis);
+      await clearContentfulOAuth(redis);
       throw new TokenExpiredError(
         `Contentful authorization expired — please reconnect via /connect`
       );
